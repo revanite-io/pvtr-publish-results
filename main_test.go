@@ -183,6 +183,26 @@ func TestPublish_FailsClosedBeforeNetwork(t *testing.T) {
 	}
 }
 
+func TestPublish_DryRunWritesLayoutsWithoutCredentials(t *testing.T) {
+	p, calls := stubbed(t, "osps-baseline", "other")
+	p.dryRun = t.TempDir()
+	p.resolveCreds = func(context.Context, io.Writer, string) (creds, error) {
+		t.Fatal("creds must not be resolved")
+		return creds{}, nil
+	}
+	if err := publish(context.Background(), io.Discard, p); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("dry run must not publish, got %d calls", len(*calls))
+	}
+	for _, repo := range []string{"acme/my-repo-osps-baseline", "acme/my-repo-other"} {
+		if _, err := os.Stat(filepath.Join(p.dryRun, repo, "index.json")); err != nil {
+			t.Errorf("no OCI layout for %s: %v", repo, err)
+		}
+	}
+}
+
 func TestPublish_StopsAtFirstFailureNamingTheTrustGap(t *testing.T) {
 	p, calls := stubbed(t, "a", "b")
 	p.publish = func(_ context.Context, in bundle.Input, t bundle.Target, _ *keyless.Signer) (*bundle.Published, error) {

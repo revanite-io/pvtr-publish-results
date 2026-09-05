@@ -1,0 +1,35 @@
+# Rehearses publish.yml against this repository in dry-run mode: everything
+# runs for real except the publish itself. The trust root is exercised too,
+# since a local `uses:` still pins the publisher to job.workflow_sha.
+name: Self-test
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  rehearse:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      target: revanite-io/pvtr-publish-results@0.0.0
+      license: CC0-1.0
+      dry-run: true
+    secrets:
+      config: |
+        services:
+          pvtr-publish-results:
+            plugin: openssf/github-repo
+            policy:
+              catalogs:
+                - osps-baseline
+              applicability:
+                - maturity-1
+            vars:
+              owner: revanite-io
+              repo: pvtr-publish-results
+              token: ${{ secrets.GITHUB_TOKEN }}

@@ -58,6 +58,7 @@ in the certificate instead of `refs/tags/v1`, and the hub's identity check fails
 | `license`          | yes      | SPDX expression. The hub rejects unlicensed bundles. |
 | `config` (input)   | one of   | Path in the caller's checkout to a pvtr config with exactly one target. |
 | `config` (secret)  | one of   | The same config inline, for plugins whose vars carry secrets. |
+| `dry-run`          | no       | Run everything but the publish; bundles land in the `pvtr-bundles` artifact as OCI layouts. Nothing is signed or sent. |
 
 The hub is not an input. It is part of what "verified" means, so it is fixed
 to `https://hub.grc.store` in the workflow.
@@ -147,6 +148,14 @@ from outside collaborators need approval before their workflows run, and
 secret scanning with push protection is on. Dependabot keeps the pinned
 action SHAs and Go modules current. Report vulnerabilities privately through
 the repository's Security tab.
+
+## Self-test
+
+`selftest.yml` calls this workflow against this repository with the
+`openssf/github-repo` plugin in dry-run mode, on every push to `main` and on
+demand. It rehearses everything except the hub push and the Sigstore signing:
+the verified plugin install, the unprivileged run, the pre-run binding, the
+artifact handoff, the pinned publisher checkout, and the cold build.
 
 ## Development
 

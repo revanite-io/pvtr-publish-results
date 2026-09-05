@@ -28,6 +28,10 @@ on:
         description: Path in the caller's checkout of a pvtr config naming exactly one target. Mutually exclusive with the config secret.
         type: string
         required: false
+      dry-run:
+        description: Run everything but the publish. Bundles are written to OCI layouts and uploaded as the pvtr-bundles artifact; nothing is signed or sent to the hub.
+        type: boolean
+        default: false
     secrets:
       config:
         description: Inline pvtr config, for plugins whose vars carry secrets (pvtr reads vars from the config file only). Mutually exclusive with the config input.
@@ -193,8 +197,10 @@ jobs:
           EVALUATOR_DIGEST: ${{ needs.run.outputs.evaluator-digest }}
           STARTED_AT: ${{ needs.run.outputs.started-at }}
           EXIT_CODE: ${{ needs.run.outputs.exit-code }}
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
-          go run . \
+          if [ "$DRY_RUN" = true ]; then set -- --dry-run "$RUNNER_TEMP/bundles"; fi
+          go run . "$@" \
             --write-directory "$RUNNER_TEMP/results" \
             --evaluator-coordinate "$EVALUATOR_COORDINATE" \
             --evaluator-digest "$EVALUATOR_DIGEST" \
@@ -202,6 +208,14 @@ jobs:
             --license "$LICENSE" \
             --started-at "$STARTED_AT" \
             --run-exit-code "$EXIT_CODE"
+
+      - name: Upload the dry-run bundles
+        if: inputs.dry-run
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pvtr-bundles
+          path: ${{ runner.temp }}/bundles
+          if-no-files-found: error
 
       # Failing results are published (they are the honest record) and then
       # the job still reports the run's outcome.

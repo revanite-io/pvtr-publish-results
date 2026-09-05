@@ -63,6 +63,7 @@ func main() {
 	flag.StringVar(&p.license, "license", "", "SPDX expression the logs are published under")
 	flag.StringVar(&startedAt, "started-at", "", "RFC 3339 time the pvtr run started; older output is refused")
 	flag.IntVar(&p.runExitCode, "run-exit-code", 0, "exit code of pvtr run")
+	flag.StringVar(&p.dryRun, "dry-run", "", "write the bundles to OCI layouts under this directory instead of publishing; no credentials, no signing, no network")
 	flag.Parse()
 
 	var err error
@@ -151,6 +152,7 @@ type params struct {
 	license     string // SPDX; canonicalized by publish
 	startedOn   time.Time
 	runExitCode int
+	dryRun      string // OCI layout root; empty publishes for real
 
 	// Test seams: nil selects the real clientkit sequence.
 	publish      func(context.Context, bundle.Input, bundle.Target, *keyless.Signer) (*bundle.Published, error)
@@ -192,6 +194,13 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 		return err
 	}
 
+	// A dry run stops here: everything above has been validated, and the
+	// same bundles are written to disk (one layout per repository, since
+	// every log of a run shares a tag) without touching credentials.
+	if p.dryRun != "" {
+		return dryRun(ctx, w, p, logs, license)
+	}
+
 	resolve, pub := p.resolveCreds, p.publish
 	if resolve == nil {
 		resolve = resolveCreds
@@ -205,38 +214,9 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 	}
 
 	for _, s := range logs {
-		body, err := yaml.Marshal(s.log)
+		in, err := input(p, s, license, c.registry)
 		if err != nil {
-			return fmt.Errorf("encoding %s: %w", s.log.Metadata.Id, err)
-		}
-		filename := s.log.Metadata.Id + ".yaml"
-		pred := provenance.Build(provenance.Input{
-			Tool:           "pvtr-publish-results",
-			StartedOn:      p.startedOn,
-			ArtifactType:   gemara.EvaluationLogArtifact.String(),
-			ArtifactID:     s.log.Metadata.Id,
-			ArtifactName:   filename,
-			ArtifactDigest: digest.FromBytes(body).String(),
-			SourceFiles:    map[string]string{s.source: s.sourceHash},
-			Registry:       c.registry,
-			Repository:     s.repository,
-			Tag:            s.tag,
-			Evaluator: &provenance.Evaluator{
-				Coordinate:    p.evaluator.Coordinate,
-				IndexDigest:   p.evaluator.IndexDigest,
-				TargetID:      p.target.ID,
-				TargetVersion: p.target.Version,
-				RunID:         p.startedOn.UTC().Format(slug.EvaluationLogVersionTimeLayout),
-			},
-		})
-		in := bundle.Input{
-			Filename:      filename,
-			ArtifactType:  gemara.EvaluationLogArtifact.String(),
-			ArtifactID:    s.log.Metadata.Id,
-			GemaraVersion: s.log.Metadata.GemaraVersion,
-			Body:          body,
-			License:       license,
-			Provenance:    pred,
+			return err
 		}
 		t := bundle.Target{HubURL: p.hubURL, Repository: s.repository, Tag: s.tag, Bearer: c.bearer}
 		_, _ = fmt.Fprintf(w, "Publishing %s:%s\n", s.repository, s.tag)
@@ -248,6 +228,61 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 			return fmt.Errorf("publishing %s:%s: %w", s.repository, s.tag, err)
 		}
 		_, _ = fmt.Fprintf(w, "Published %s:%s (signed=%t attested=%t)\n", s.repository, s.tag, res.Signed, res.Attested)
+	}
+	return nil
+}
+
+// input builds the bundle for one stamped log: the log body plus the SLSA
+// predicate that binds it to the evaluator, target, and run.
+func input(p params, s stamped, license, registry string) (bundle.Input, error) {
+	body, err := yaml.Marshal(s.log)
+	if err != nil {
+		return bundle.Input{}, fmt.Errorf("encoding %s: %w", s.log.Metadata.Id, err)
+	}
+	filename := s.log.Metadata.Id + ".yaml"
+	pred := provenance.Build(provenance.Input{
+		Tool:           "pvtr-publish-results",
+		StartedOn:      p.startedOn,
+		ArtifactType:   gemara.EvaluationLogArtifact.String(),
+		ArtifactID:     s.log.Metadata.Id,
+		ArtifactName:   filename,
+		ArtifactDigest: digest.FromBytes(body).String(),
+		SourceFiles:    map[string]string{s.source: s.sourceHash},
+		Registry:       registry,
+		Repository:     s.repository,
+		Tag:            s.tag,
+		Evaluator: &provenance.Evaluator{
+			Coordinate:    p.evaluator.Coordinate,
+			IndexDigest:   p.evaluator.IndexDigest,
+			TargetID:      p.target.ID,
+			TargetVersion: p.target.Version,
+			RunID:         p.startedOn.UTC().Format(slug.EvaluationLogVersionTimeLayout),
+		},
+	})
+	return bundle.Input{
+		Filename:      filename,
+		ArtifactType:  gemara.EvaluationLogArtifact.String(),
+		ArtifactID:    s.log.Metadata.Id,
+		GemaraVersion: s.log.Metadata.GemaraVersion,
+		Body:          body,
+		License:       license,
+		Provenance:    pred,
+	}, nil
+}
+
+// dryRun writes each bundle to <root>/<repository> as an OCI image layout.
+func dryRun(ctx context.Context, w io.Writer, p params, logs []stamped, license string) error {
+	for _, s := range logs {
+		in, err := input(p, s, license, "")
+		if err != nil {
+			return err
+		}
+		dir := filepath.Join(p.dryRun, s.repository)
+		res, err := bundle.PushLocal(ctx, dir, s.tag, in)
+		if err != nil {
+			return fmt.Errorf("dry run %s:%s: %w", s.repository, s.tag, err)
+		}
+		_, _ = fmt.Fprintf(w, "Dry run: would publish %s:%s (manifest %s), written to %s\n", s.repository, s.tag, res.ManifestDigest, dir)
 	}
 	return nil
 }
