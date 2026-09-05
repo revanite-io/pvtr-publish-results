@@ -7,6 +7,10 @@
 #
 # so the repo name, this file's path, and the v1 tag are the trust root.
 # Renaming or moving any of them invalidates every result published so far.
+#
+# Two jobs on purpose. The plugin is third-party code, so it runs in a job
+# that holds no token able to mint this workflow's identity, and its
+# evaluator binding is recorded before it runs. A fresh runner then publishes.
 name: Publish verified results
 
 on:
@@ -24,10 +28,6 @@ on:
         description: Path in the caller's checkout of a pvtr config naming exactly one target. Mutually exclusive with the config secret.
         type: string
         required: false
-      hub-url:
-        description: grc.store hub base URL
-        type: string
-        default: https://hub.grc.store
     secrets:
       config:
         description: Inline pvtr config, for plugins whose vars carry secrets (pvtr reads vars from the config file only). Mutually exclusive with the config input.
@@ -36,32 +36,29 @@ on:
 permissions: {}
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  run:
+    runs-on: ubuntu-24.04
     permissions:
-      contents: read
-      id-token: write # the hub bearer (trusted publishing) and the Sigstore identity; nothing else
+      contents: read # the caller's checkout; no id-token here
+    outputs:
+      evaluator-coordinate: ${{ steps.evaluator.outputs.coordinate }}
+      evaluator-digest: ${{ steps.evaluator.outputs.digest }}
+      started-at: ${{ steps.run.outputs.started-at }}
+      exit-code: ${{ steps.run.outputs.exit-code }}
     env:
       # PVTR_* is read by pvtr and by the plugin it spawns (viper AutomaticEnv),
       # which is how the run is forced to gemara output without editing the
-      # caller's config. The paths are set in the first step: the runner
-      # context is not available at job level.
+      # caller's config. Env outranks the config file, so the caller cannot
+      # redirect the hub, the output format, or the paths from there.
       PVTR_OUTPUT: gemara
       PVTR_WRITE: "true"
-      PVTR_HUB_URL: ${{ inputs.hub-url }}
+      PVTR_HUB_URL: https://hub.grc.store
     steps:
       - name: Resolve config and paths
         env:
           CONFIG_PATH: ${{ inputs.config }}
           CONFIG_INLINE: ${{ secrets.config }}
-          PUBLISHER_SHA: ${{ job.workflow_sha }}
         run: |
-          # An empty SHA would check the publisher out at its default branch,
-          # silently unpinning it from the certificate. job.workflow_sha is
-          # not available on GitHub Enterprise Server.
-          if [ -z "$PUBLISHER_SHA" ]; then
-            echo "::error::job.workflow_sha is empty; cannot pin the publisher to this workflow's commit"; exit 1
-          fi
           {
             echo "PVTR_WRITE_DIRECTORY=$RUNNER_TEMP/results"
             echo "PVTR_BINARIES_PATH=$RUNNER_TEMP/plugins"
@@ -89,17 +86,35 @@ jobs:
         env:
           PVTR_VERSION: v0.23.0
           PVTR_SHA256: 79f69ca91470d99269f957703784b57de532f0a242d9c3c442ff0b0d266564f8 # pvtr_Linux_x86_64.tar.gz
+          GH_TOKEN: ${{ github.token }} # attestation lookup only
         run: |
           mkdir -p "$TOOL_DIR" && cd "$TOOL_DIR"
           curl -sSfL -o pvtr.tar.gz "https://github.com/privateerproj/privateer/releases/download/$PVTR_VERSION/pvtr_Linux_x86_64.tar.gz"
           echo "$PVTR_SHA256  pvtr.tar.gz" | sha256sum -c -
+          gh attestation verify pvtr.tar.gz --repo privateerproj/privateer
           tar -xzf pvtr.tar.gz pvtr
           echo "$TOOL_DIR" >> "$GITHUB_PATH"
 
       # A fresh binaries path holds exactly the one plugin the config names,
-      # verified end to end by pvtr install; the publisher refuses anything else.
+      # verified end to end by pvtr install (signature, signer identity,
+      # digest chain) before it is written.
       - name: Install the plugin from grc.store
         run: pvtr install --from-config
+
+      # Read before the plugin runs. Step outputs are fixed once the step
+      # ends, so the plugin cannot later attribute its log to another plugin.
+      - name: Record the evaluator binding
+        id: evaluator
+        run: |
+          m="$PVTR_BINARIES_PATH/plugins.json"
+          n=$(jq '.plugins | length' "$m")
+          if [ "$n" != 1 ]; then
+            echo "::error::expected exactly one installed plugin, found $n"; exit 1
+          fi
+          {
+            echo "coordinate=$(jq -r '[.plugins[]][0].coordinate // empty' "$m")"
+            echo "digest=$(jq -r '[.plugins[]][0].indexDigest // empty' "$m")"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Run pvtr
         id: run
@@ -108,6 +123,36 @@ jobs:
           set +e
           pvtr run
           echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Hand the results to the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pvtr-results
+          path: ${{ env.PVTR_WRITE_DIRECTORY }}
+          if-no-files-found: error
+
+  publish:
+    needs: run
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write # the hub bearer (trusted publishing) and the Sigstore identity
+    steps:
+      # An empty SHA would check the publisher out at its default branch,
+      # silently unpinning it from the certificate. job.workflow_sha is not
+      # available on GitHub Enterprise Server.
+      - name: Require the workflow commit
+        env:
+          PUBLISHER_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$PUBLISHER_SHA" ]; then
+            echo "::error::job.workflow_sha is empty; cannot pin the publisher to this workflow's commit"; exit 1
+          fi
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pvtr-results
+          path: ${{ runner.temp }}/results
 
       # The publisher is checked out at the commit of this workflow file, so
       # the code that runs is the code the certificate names. The repository
@@ -131,17 +176,23 @@ jobs:
         env:
           TARGET: ${{ inputs.target }}
           LICENSE: ${{ inputs.license }}
+          EVALUATOR_COORDINATE: ${{ needs.run.outputs.evaluator-coordinate }}
+          EVALUATOR_DIGEST: ${{ needs.run.outputs.evaluator-digest }}
+          STARTED_AT: ${{ needs.run.outputs.started-at }}
+          EXIT_CODE: ${{ needs.run.outputs.exit-code }}
         run: |
           go run . \
-            --hub-url "$PVTR_HUB_URL" \
-            --write-directory "$PVTR_WRITE_DIRECTORY" \
-            --binaries-path "$PVTR_BINARIES_PATH" \
+            --write-directory "$RUNNER_TEMP/results" \
+            --evaluator-coordinate "$EVALUATOR_COORDINATE" \
+            --evaluator-digest "$EVALUATOR_DIGEST" \
             --target "$TARGET" \
             --license "$LICENSE" \
-            --started-at "${{ steps.run.outputs.started-at }}" \
-            --run-exit-code "${{ steps.run.outputs.exit-code }}"
+            --started-at "$STARTED_AT" \
+            --run-exit-code "$EXIT_CODE"
 
       # Failing results are published (they are the honest record) and then
       # the job still reports the run's outcome.
       - name: Report the run's outcome
-        run: exit "${{ steps.run.outputs.exit-code }}"
+        env:
+          EXIT_CODE: ${{ needs.run.outputs.exit-code }}
+        run: exit "$EXIT_CODE"

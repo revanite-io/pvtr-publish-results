@@ -21,7 +21,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -58,7 +57,8 @@ func main() {
 	)
 	flag.StringVar(&p.hubURL, "hub-url", "https://hub.grc.store", "grc.store hub base URL")
 	flag.StringVar(&p.writeDir, "write-directory", "evaluation_results", "pvtr run's write directory")
-	flag.StringVar(&p.binariesPath, "binaries-path", "", "pvtr run's binaries path; its plugins.json supplies the evaluator binding")
+	flag.StringVar(&p.evaluator.Coordinate, "evaluator-coordinate", "", "grc.store <namespace>/<plugin-id> of the plugin that ran, read from pvtr's install manifest before the run")
+	flag.StringVar(&p.evaluator.IndexDigest, "evaluator-digest", "", "sha256:<hex> index digest of that plugin, from the same manifest")
 	flag.StringVar(&rawTarget, "target", "", "<namespace>/<id>@<version> the results describe")
 	flag.StringVar(&p.license, "license", "", "SPDX expression the logs are published under")
 	flag.StringVar(&startedAt, "started-at", "", "RFC 3339 time the pvtr run started; older output is refused")
@@ -119,50 +119,38 @@ func canonLicense(raw string) (string, error) {
 	return canon, nil
 }
 
-// evaluator is the grc.store identity of the plugin that ran, from pvtr's
-// install manifest.
+// evaluator is the grc.store identity of the plugin that ran. The workflow
+// reads it from pvtr's install manifest in the install step, before the
+// plugin runs, and hands it over as job outputs: the plugin is third-party
+// code and must not be able to attribute its log to another plugin by
+// editing the manifest after the fact.
 type evaluator struct {
-	Coordinate  string `json:"coordinate"`
-	IndexDigest string `json:"indexDigest"`
+	Coordinate  string
+	IndexDigest string
 }
 
-// loadEvaluator reads pvtr's install manifest. The workflow installs into a
-// fresh binaries path, so exactly one plugin is expected, and it must be a
-// verified grc.store install: a plugin from anywhere else has no coordinate
-// and no digest, and its results cannot carry the binding the verified tier
-// exists for.
-func loadEvaluator(binariesPath string) (evaluator, error) {
-	raw, err := os.ReadFile(filepath.Join(binariesPath, "plugins.json"))
-	if err != nil {
-		return evaluator{}, fmt.Errorf("reading install manifest: %w", err)
+// validate requires a verified grc.store install: a hub plugin coordinate
+// and a sha256 index digest. A plugin from anywhere else has neither, and
+// its results cannot carry the binding the verified tier exists for.
+func (e evaluator) validate() error {
+	if !slug.IsHubPluginCoordinate(e.Coordinate) {
+		return fmt.Errorf("evaluator coordinate %q is not a grc.store <namespace>/<plugin-id>; only a verified install can be published", e.Coordinate)
 	}
-	var m struct {
-		Plugins map[string]evaluator `json:"plugins"`
+	if d, err := digest.Parse(e.IndexDigest); err != nil || d.Algorithm() != digest.SHA256 {
+		return fmt.Errorf("evaluator digest %q is not a sha256 digest", e.IndexDigest)
 	}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return evaluator{}, fmt.Errorf("decoding install manifest: %w", err)
-	}
-	if len(m.Plugins) != 1 {
-		return evaluator{}, fmt.Errorf("install manifest lists %d plugins; the run must install exactly one, from grc.store", len(m.Plugins))
-	}
-	for name, e := range m.Plugins {
-		if e.Coordinate == "" || e.IndexDigest == "" {
-			return evaluator{}, fmt.Errorf("plugin %s was not installed from grc.store; only a verified install can be published", name)
-		}
-		return e, nil
-	}
-	panic("unreachable")
+	return nil
 }
 
 // params drives publish.
 type params struct {
-	hubURL       string
-	writeDir     string
-	binariesPath string
-	target       target
-	license      string // SPDX; canonicalized by publish
-	startedOn    time.Time
-	runExitCode  int
+	hubURL      string
+	writeDir    string
+	evaluator   evaluator
+	target      target
+	license     string // SPDX; canonicalized by publish
+	startedOn   time.Time
+	runExitCode int
 
 	// Test seams: nil selects the real clientkit sequence.
 	publish      func(context.Context, bundle.Input, bundle.Target, *keyless.Signer) (*bundle.Published, error)
@@ -196,11 +184,10 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 	if err != nil {
 		return err
 	}
-	ev, err := loadEvaluator(p.binariesPath)
-	if err != nil {
+	if err := p.evaluator.validate(); err != nil {
 		return err
 	}
-	logs, err := loadLogs(p.writeDir, p.target, p.startedOn, ev)
+	logs, err := loadLogs(p.writeDir, p.target, p.startedOn, p.evaluator)
 	if err != nil {
 		return err
 	}
@@ -235,8 +222,8 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 			Repository:     s.repository,
 			Tag:            s.tag,
 			Evaluator: &provenance.Evaluator{
-				Coordinate:    ev.Coordinate,
-				IndexDigest:   ev.IndexDigest,
+				Coordinate:    p.evaluator.Coordinate,
+				IndexDigest:   p.evaluator.IndexDigest,
 				TargetID:      p.target.ID,
 				TargetVersion: p.target.Version,
 				RunID:         p.startedOn.UTC().Format(slug.EvaluationLogVersionTimeLayout),

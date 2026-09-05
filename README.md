@@ -58,20 +58,37 @@ in the certificate instead of `refs/tags/v1`, and the hub's identity check fails
 | `license`          | yes      | SPDX expression. The hub rejects unlicensed bundles. |
 | `config` (input)   | one of   | Path in the caller's checkout to a pvtr config with exactly one target. |
 | `config` (secret)  | one of   | The same config inline, for plugins whose vars carry secrets. |
-| `hub-url`          | no       | Defaults to `https://hub.grc.store`. |
+
+The hub is not an input. It is part of what "verified" means, so it is fixed
+to `https://hub.grc.store` in the workflow.
 
 ## What the workflow does
 
-1. Installs a pinned, checksum-verified pvtr release.
+Two jobs. The plugin is third-party code, so the job that runs it holds no
+token that could mint this workflow's identity, and nothing it can write
+reaches the publisher except the results themselves.
+
+**`run`** (permissions: `contents: read` only)
+
+1. Installs a pinned pvtr release, verified by checksum and by its GitHub
+   artifact attestation.
 2. `pvtr install --from-config` into a fresh directory: the plugin is pulled
    from grc.store and verified (signature, signer identity, digest chain)
-   before it is written. Plugins from anywhere else are refused at publish.
-3. `pvtr run`, forced to gemara output through `PVTR_*` env. The run's exit
-   code is captured, not acted on.
-4. Checks out this repo at the SHA of the workflow file and runs the
-   publisher (`main.go`). Pass and fail both publish; abort, error, and usage
-   failures publish nothing.
-5. Exits with the run's exit code so the job reflects the evaluation.
+   before it is written.
+3. Records the installed plugin's coordinate and index digest as step
+   outputs, before the plugin runs, so it cannot attribute its log to another
+   plugin afterwards.
+4. `pvtr run`, forced to gemara output through `PVTR_*` env, which outranks
+   the caller's config file. The exit code is captured, not acted on.
+5. Uploads the results directory as an artifact.
+
+**`publish`** (permissions: `contents: read`, `id-token: write`), on a fresh runner
+
+6. Downloads the results, checks out this repo at the commit of the workflow
+   file (`job.workflow_sha`, refused if empty), and runs the publisher
+   (`main.go`) with the evaluator binding from job outputs. Pass and fail
+   both publish; abort, error, and usage failures publish nothing.
+7. Exits with the run's exit code so the job reflects the evaluation.
 
 ## What the publisher does
 
@@ -91,8 +108,9 @@ with nothing pushed:
   only when its author names the coordinate the provenance binds, so a
   mismatch is refused rather than published unverified.
 - The SLSA provenance carries an `evaluator` binding: the plugin's grc.store
-  coordinate and released index digest from pvtr's install manifest, the
-  target, and the run id.
+  coordinate and released index digest, recorded before the plugin ran, the
+  target, and the run id. Both must parse as a hub coordinate and a sha256
+  digest.
 - Output older than the run start is refused as a leftover.
 
 The publish sequence itself (mint, pack, push, sign, provenance, sync) is
@@ -116,6 +134,13 @@ That is a hub policy and namespace-ownership question, not a signing one.
 - An org admin must bind the *calling* repository to the target namespace as
   a CI publisher (hub ADR-0032). The hub reads the caller's repository from
   the OIDC token; this workflow's own repository needs no binding.
+
+## Repository governance
+
+The repo is the trust root, so its settings are part of the design. Rulesets
+require a pull request and a green `test` check on `main`, forbid force
+pushes, and restrict `v*` tags to repository admins. Dependabot keeps the
+pinned action SHAs and Go modules current.
 
 ## Development
 

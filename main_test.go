@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -41,21 +40,6 @@ func writeLogs(t *testing.T, dir, svc string, catalogs ...string) {
 	}
 }
 
-// writeManifest writes pvtr's plugins.json with the given entries.
-func writeManifest(t *testing.T, dir string, plugins map[string]evaluator) {
-	t.Helper()
-	raw, err := json.Marshal(map[string]any{"plugins": plugins})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "plugins.json"), raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 type call struct {
 	in bundle.Input
 	t  bundle.Target
@@ -69,10 +53,10 @@ func stubbed(t *testing.T, catalogs ...string) (params, *[]call) {
 	if len(catalogs) > 0 {
 		writeLogs(t, filepath.Join(dir, "results"), "svc", catalogs...)
 	}
-	writeManifest(t, filepath.Join(dir, "bin"), map[string]evaluator{"acme/scanner@1.0.0": {Coordinate: "acme/scanner", IndexDigest: "sha256:abc"}})
 	calls := &[]call{}
 	return params{
-		hubURL: "https://hub.example", writeDir: filepath.Join(dir, "results"), binariesPath: filepath.Join(dir, "bin"),
+		hubURL: "https://hub.example", writeDir: filepath.Join(dir, "results"),
+		evaluator: evaluator{Coordinate: "acme/scanner", IndexDigest: "sha256:" + strings.Repeat("ab", 32)},
 		target:    target{Namespace: "acme", ID: "my-repo", Version: "1.2.3"},
 		license:   "CC0-1.0",
 		startedOn: time.Date(2026, 9, 4, 10, 15, 0, 0, time.UTC),
@@ -160,12 +144,8 @@ func TestPublish_FailsClosedBeforeNetwork(t *testing.T) {
 			writeLogs(t, p.writeDir, "other", "cat")
 			return p
 		},
-		"catalog id not an OCI path": func() params { p, _ := stubbed(t, "."); return p },
-		"author is not the installed plugin": func() params {
-			p, _ := stubbed(t, "cat")
-			writeManifest(t, p.binariesPath, map[string]evaluator{"acme/other@1.0.0": {Coordinate: "acme/other", IndexDigest: "sha256:abc"}})
-			return p
-		},
+		"catalog id not an OCI path":         func() params { p, _ := stubbed(t, "."); return p },
+		"author is not the installed plugin": func() params { p, _ := stubbed(t, "cat"); p.evaluator.Coordinate = "acme/other"; return p },
 		"log id not <svc>_<catalog>": func() params {
 			p, _ := stubbed(t, "cat")
 			f := filepath.Join(p.writeDir, "svc", "svc.yaml")
@@ -181,20 +161,13 @@ func TestPublish_FailsClosedBeforeNetwork(t *testing.T) {
 			}
 			return p
 		},
-		"plugin not from grc.store": func() params {
+		"no evaluator binding": func() params { p, _ := stubbed(t, "cat"); p.evaluator = evaluator{}; return p },
+		"evaluator not a coordinate": func() params {
 			p, _ := stubbed(t, "cat")
-			writeManifest(t, p.binariesPath, map[string]evaluator{"local/scanner@1.0.0": {}})
+			p.evaluator.Coordinate = "https://github.com/acme/scanner"
 			return p
 		},
-		"more than one plugin installed": func() params {
-			p, _ := stubbed(t, "cat")
-			writeManifest(t, p.binariesPath, map[string]evaluator{
-				"acme/scanner@1.0.0": {Coordinate: "acme/scanner", IndexDigest: "sha256:abc"},
-				"acme/other@1.0.0":   {Coordinate: "acme/other", IndexDigest: "sha256:def"},
-			})
-			return p
-		},
-		"no install manifest": func() params { p, _ := stubbed(t, "cat"); p.binariesPath = t.TempDir(); return p },
+		"evaluator digest malformed": func() params { p, _ := stubbed(t, "cat"); p.evaluator.IndexDigest = "sha256:abc"; return p },
 	}
 	for name, mk := range cases {
 		t.Run(name, func(t *testing.T) {
