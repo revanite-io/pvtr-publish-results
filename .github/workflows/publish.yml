@@ -176,10 +176,13 @@ jobs:
           path: .pvtr-publish-results
           persist-credentials: false
 
+      # No module cache: caches belong to the caller's repository, and a
+      # restored module directory is not re-verified against go.sum. Modules
+      # are fetched fresh through the proxy and checked against go.sum.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: .pvtr-publish-results/go.mod
-          cache-dependency-path: .pvtr-publish-results/go.sum
+          cache: false
 
       - name: Publish results
         working-directory: .pvtr-publish-results
