@@ -143,6 +143,11 @@ jobs:
           sudo useradd --create-home --shell /usr/sbin/nologin pvtr
           mkdir -p "$PVTR_WRITE_DIRECTORY"
           sudo chown -R pvtr: "$PVTR_WRITE_DIRECTORY" "$PVTR_BINARIES_PATH"
+          # Ubuntu makes /home/runner 0750, so another user cannot reach
+          # anything under RUNNER_TEMP. Traverse-only, on the directories
+          # between / and the tools; nothing becomes readable that was not.
+          d=$TOOL_DIR; while [ "$d" != / ]; do sudo chmod o+x "$d"; d=$(dirname "$d"); done
+          sudo -u pvtr test -x "$TOOL_DIR/pvtr" -a -r "$PVTR_CONFIG"
           set +e
           sudo -H -u pvtr --preserve-env=PVTR_OUTPUT,PVTR_WRITE,PVTR_HUB_URL,PVTR_WRITE_DIRECTORY,PVTR_BINARIES_PATH,PVTR_CONFIG \
             "$TOOL_DIR/pvtr" run
