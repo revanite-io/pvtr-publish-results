@@ -5,8 +5,8 @@ plugin against one target and publishes the resulting Gemara EvaluationLogs to
 [grc.store](https://grc.store) as signed OCI bundles.
 
 The Sigstore certificate on every bundle names this workflow, not the caller's.
-That is the whole point: the hub can grant a **verified** tier with one string
-comparison against the trust root
+That is the whole point: the hub can accept a log with one string comparison
+against the trust root
 
 ```text
 revanite-io/pvtr-publish-results/.github/workflows/publish.yml@refs/tags/v1
@@ -51,6 +51,10 @@ secret gets its config inline instead:
 
 Reference the workflow by tag, not by commit SHA. A SHA-pinned call puts the SHA
 in the certificate instead of `refs/tags/v1`, and the hub's identity check fails.
+The hub is configured with exactly one accepted tag per environment: production
+accepts `v1`, and `preview.grc.store` accepts the pre-release tag `v1.0.0-rc`.
+Callers publishing to preview use `@v1.0.0-rc`; each environment rejects the
+other's tag.
 
 | Input / secret     | Required | Meaning |
 |--------------------|----------|---------|
