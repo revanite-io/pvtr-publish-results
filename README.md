@@ -78,8 +78,10 @@ reaches the publisher except the results themselves.
 3. Records the installed plugin's coordinate and index digest as step
    outputs, before the plugin runs, so it cannot attribute its log to another
    plugin afterwards.
-4. `pvtr run`, forced to gemara output through `PVTR_*` env, which outranks
-   the caller's config file. The exit code is captured, not acted on.
+4. `pvtr run` as a throwaway user with no sudo, so the plugin cannot reach
+   the runner process or the code of later steps. Output is forced to gemara
+   through `PVTR_*` env, which outranks the caller's config file. The exit
+   code is captured, not acted on.
 5. Uploads the results directory as an artifact.
 
 **`publish`** (permissions: `contents: read`, `id-token: write`), on a fresh runner
@@ -139,8 +141,12 @@ That is a hub policy and namespace-ownership question, not a signing one.
 
 The repo is the trust root, so its settings are part of the design. Rulesets
 require a pull request and a green `test` check on `main`, forbid force
-pushes, and restrict `v*` tags to repository admins. Dependabot keeps the
-pinned action SHAs and Go modules current.
+pushes, and restrict `v*` tags to repository admins. Only GitHub-authored
+actions may run, the default workflow token is read-only, fork pull requests
+from outside collaborators need approval before their workflows run, and
+secret scanning with push protection is on. Dependabot keeps the pinned
+action SHAs and Go modules current. Report vulnerabilities privately through
+the repository's Security tab.
 
 ## Development
 

@@ -116,13 +116,23 @@ jobs:
             echo "digest=$(jq -r '[.plugins[]][0].indexDigest // empty' "$m")"
           } >> "$GITHUB_OUTPUT"
 
+      # The runner user has passwordless sudo, and the plugin would inherit
+      # it. A throwaway user with no sudo keeps the plugin away from the
+      # runner process (which holds the outputs recorded above) and from the
+      # code of the steps that follow.
       - name: Run pvtr
         id: run
         run: |
           echo "started-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          sudo useradd --create-home --shell /usr/sbin/nologin pvtr
+          mkdir -p "$PVTR_WRITE_DIRECTORY"
+          sudo chown -R pvtr: "$PVTR_WRITE_DIRECTORY" "$PVTR_BINARIES_PATH"
           set +e
-          pvtr run
+          sudo -H -u pvtr --preserve-env=PVTR_OUTPUT,PVTR_WRITE,PVTR_HUB_URL,PVTR_WRITE_DIRECTORY,PVTR_BINARIES_PATH,PVTR_CONFIG \
+            "$TOOL_DIR/pvtr" run
           echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+          # pvtr writes results 0640; the upload runs as the runner user.
+          sudo chmod -R a+rX "$PVTR_WRITE_DIRECTORY"
 
       - name: Hand the results to the publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
