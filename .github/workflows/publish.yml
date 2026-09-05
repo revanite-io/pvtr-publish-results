@@ -95,7 +95,10 @@ jobs:
           mkdir -p "$TOOL_DIR" && cd "$TOOL_DIR"
           curl -sSfL -o pvtr.tar.gz "https://github.com/privateerproj/privateer/releases/download/$PVTR_VERSION/pvtr_Linux_x86_64.tar.gz"
           echo "$PVTR_SHA256  pvtr.tar.gz" | sha256sum -c -
-          gh attestation verify pvtr.tar.gz --repo privateerproj/privateer
+          # pvtr is built by a reusable workflow, so the certificate names it,
+          # not privateerproj/privateer; --repo still checks the source repo.
+          gh attestation verify pvtr.tar.gz --repo privateerproj/privateer \
+            --signer-workflow github-community-projects/ospo-reusable-workflows/.github/workflows/release.yaml
           tar -xzf pvtr.tar.gz pvtr
           echo "$TOOL_DIR" >> "$GITHUB_PATH"
 
