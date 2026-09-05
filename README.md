@@ -121,6 +121,7 @@ That is a hub policy and namespace-ownership question, not a signing one.
 
 ```sh
 go test -race ./... && go vet ./... && test -z "$(gofmt -l .)"
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -ignore 'property "workflow_sha" is not defined'
 ```
 
 Every commit carries a DCO `Signed-off-by` trailer (`git commit -s`).

@@ -44,19 +44,29 @@ jobs:
     env:
       # PVTR_* is read by pvtr and by the plugin it spawns (viper AutomaticEnv),
       # which is how the run is forced to gemara output without editing the
-      # caller's config.
+      # caller's config. The paths are set in the first step: the runner
+      # context is not available at job level.
       PVTR_OUTPUT: gemara
       PVTR_WRITE: "true"
-      PVTR_WRITE_DIRECTORY: ${{ runner.temp }}/results
-      PVTR_BINARIES_PATH: ${{ runner.temp }}/plugins
       PVTR_HUB_URL: ${{ inputs.hub-url }}
-      TOOL_DIR: ${{ runner.temp }}/tools
     steps:
-      - name: Resolve config
+      - name: Resolve config and paths
         env:
           CONFIG_PATH: ${{ inputs.config }}
           CONFIG_INLINE: ${{ secrets.config }}
+          PUBLISHER_SHA: ${{ job.workflow_sha }}
         run: |
+          # An empty SHA would check the publisher out at its default branch,
+          # silently unpinning it from the certificate. job.workflow_sha is
+          # not available on GitHub Enterprise Server.
+          if [ -z "$PUBLISHER_SHA" ]; then
+            echo "::error::job.workflow_sha is empty; cannot pin the publisher to this workflow's commit"; exit 1
+          fi
+          {
+            echo "PVTR_WRITE_DIRECTORY=$RUNNER_TEMP/results"
+            echo "PVTR_BINARIES_PATH=$RUNNER_TEMP/plugins"
+            echo "TOOL_DIR=$RUNNER_TEMP/tools"
+          } >> "$GITHUB_ENV"
           if [ -n "$CONFIG_PATH" ] && [ -n "$CONFIG_INLINE" ]; then
             echo "::error::pass either the config input or the config secret, not both"; exit 1
           fi
@@ -99,13 +109,15 @@ jobs:
           pvtr run
           echo "exit-code=$?" >> "$GITHUB_OUTPUT"
 
-      # The publisher is checked out at the SHA of this workflow file, so the
-      # code that runs is the code the certificate names.
+      # The publisher is checked out at the commit of this workflow file, so
+      # the code that runs is the code the certificate names. The repository
+      # is spelled out rather than taken from job.workflow_repository: it is
+      # the trust root, and a fork must not quietly publish its own publisher.
       - name: Check out the publisher
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: revanite-io/pvtr-publish-results
-          ref: ${{ github.job_workflow_sha }}
+          ref: ${{ job.workflow_sha }}
           path: .pvtr-publish-results
           persist-credentials: false
 
