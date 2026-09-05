@@ -1,0 +1,135 @@
+# Reusable workflow: run one pvtr plugin against one target and publish its
+# EvaluationLogs to grc.store as signed bundles whose Sigstore certificate
+# names THIS workflow. The hub grants the verified tier by comparing the
+# certificate's job_workflow_ref with
+#
+#   revanite-io/pvtr-publish-results/.github/workflows/publish.yml@refs/tags/v1
+#
+# so the repo name, this file's path, and the v1 tag are the trust root.
+# Renaming or moving any of them invalidates every result published so far.
+name: Publish verified results
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "<namespace>/<id>@<version> the results describe. Namespace is the target owner's org; the hub must trust the calling repo to publish under it."
+        type: string
+        required: true
+      license:
+        description: SPDX expression the logs are published under, e.g. CC0-1.0
+        type: string
+        required: true
+      config:
+        description: Path in the caller's checkout of a pvtr config naming exactly one target. Mutually exclusive with the config secret.
+        type: string
+        required: false
+      hub-url:
+        description: grc.store hub base URL
+        type: string
+        default: https://hub.grc.store
+    secrets:
+      config:
+        description: Inline pvtr config, for plugins whose vars carry secrets (pvtr reads vars from the config file only). Mutually exclusive with the config input.
+        required: false
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # the hub bearer (trusted publishing) and the Sigstore identity; nothing else
+    env:
+      # PVTR_* is read by pvtr and by the plugin it spawns (viper AutomaticEnv),
+      # which is how the run is forced to gemara output without editing the
+      # caller's config.
+      PVTR_OUTPUT: gemara
+      PVTR_WRITE: "true"
+      PVTR_WRITE_DIRECTORY: ${{ runner.temp }}/results
+      PVTR_BINARIES_PATH: ${{ runner.temp }}/plugins
+      PVTR_HUB_URL: ${{ inputs.hub-url }}
+      TOOL_DIR: ${{ runner.temp }}/tools
+    steps:
+      - name: Resolve config
+        env:
+          CONFIG_PATH: ${{ inputs.config }}
+          CONFIG_INLINE: ${{ secrets.config }}
+        run: |
+          if [ -n "$CONFIG_PATH" ] && [ -n "$CONFIG_INLINE" ]; then
+            echo "::error::pass either the config input or the config secret, not both"; exit 1
+          fi
+          if [ -n "$CONFIG_INLINE" ]; then
+            printf '%s\n' "$CONFIG_INLINE" > "$RUNNER_TEMP/config.yml"
+            echo "PVTR_CONFIG=$RUNNER_TEMP/config.yml" >> "$GITHUB_ENV"
+          elif [ -n "$CONFIG_PATH" ]; then
+            echo "PVTR_CONFIG=$GITHUB_WORKSPACE/$CONFIG_PATH" >> "$GITHUB_ENV"
+          else
+            echo "::error::a pvtr config is required: the config input (a path) or the config secret (inline)"; exit 1
+          fi
+
+      - name: Check out the caller
+        if: inputs.config != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pvtr
+        env:
+          PVTR_VERSION: v0.23.0
+          PVTR_SHA256: 79f69ca91470d99269f957703784b57de532f0a242d9c3c442ff0b0d266564f8 # pvtr_Linux_x86_64.tar.gz
+        run: |
+          mkdir -p "$TOOL_DIR" && cd "$TOOL_DIR"
+          curl -sSfL -o pvtr.tar.gz "https://github.com/privateerproj/privateer/releases/download/$PVTR_VERSION/pvtr_Linux_x86_64.tar.gz"
+          echo "$PVTR_SHA256  pvtr.tar.gz" | sha256sum -c -
+          tar -xzf pvtr.tar.gz pvtr
+          echo "$TOOL_DIR" >> "$GITHUB_PATH"
+
+      # A fresh binaries path holds exactly the one plugin the config names,
+      # verified end to end by pvtr install; the publisher refuses anything else.
+      - name: Install the plugin from grc.store
+        run: pvtr install --from-config
+
+      - name: Run pvtr
+        id: run
+        run: |
+          echo "started-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          set +e
+          pvtr run
+          echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+
+      # The publisher is checked out at the SHA of this workflow file, so the
+      # code that runs is the code the certificate names.
+      - name: Check out the publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: revanite-io/pvtr-publish-results
+          ref: ${{ github.job_workflow_sha }}
+          path: .pvtr-publish-results
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .pvtr-publish-results/go.mod
+          cache-dependency-path: .pvtr-publish-results/go.sum
+
+      - name: Publish results
+        working-directory: .pvtr-publish-results
+        env:
+          TARGET: ${{ inputs.target }}
+          LICENSE: ${{ inputs.license }}
+        run: |
+          go run . \
+            --hub-url "$PVTR_HUB_URL" \
+            --write-directory "$PVTR_WRITE_DIRECTORY" \
+            --binaries-path "$PVTR_BINARIES_PATH" \
+            --target "$TARGET" \
+            --license "$LICENSE" \
+            --started-at "${{ steps.run.outputs.started-at }}" \
+            --run-exit-code "${{ steps.run.outputs.exit-code }}"
+
+      # Failing results are published (they are the honest record) and then
+      # the job still reports the run's outcome.
+      - name: Report the run's outcome
+        run: exit "${{ steps.run.outputs.exit-code }}"

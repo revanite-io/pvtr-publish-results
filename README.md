@@ -1,0 +1,126 @@
+# pvtr-publish-results
+
+A reusable GitHub Actions workflow that runs one [pvtr](https://github.com/privateerproj/privateer)
+plugin against one target and publishes the resulting Gemara EvaluationLogs to
+[grc.store](https://grc.store) as signed OCI bundles.
+
+The Sigstore certificate on every bundle names this workflow, not the caller's.
+That is the whole point: the hub can grant a **verified** tier with one string
+comparison against the trust root
+
+```text
+revanite-io/pvtr-publish-results/.github/workflows/publish.yml@refs/tags/v1
+```
+
+instead of linting the caller's workflow the way Scorecard does. A signature
+minted on a developer's machine proves who published; a signature minted here
+also proves that an unmodified, grc.store-verified plugin produced the log.
+
+## Calling it
+
+```yaml
+jobs:
+  results:
+    permissions:
+      contents: read
+      id-token: write
+    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1
+    with:
+      config: .pvtr/config.yml      # committed pvtr config naming exactly one target
+      target: acme/my-repo@1.4.0    # <namespace>/<id>@<version>; namespace is the target owner's org
+      license: CC0-1.0
+```
+
+Plugin vars are read from the config file only, so a plugin that needs a
+secret gets its config inline instead:
+
+```yaml
+    with:
+      target: acme/my-repo@1.4.0
+      license: CC0-1.0
+    secrets:
+      config: |
+        targets:
+          my-repo:
+            plugin: ossf/pvtr-github-repo-scanner
+            vars:
+              owner: acme
+              repo: my-repo
+              token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Reference the workflow by tag, not by commit SHA. A SHA-pinned call puts the SHA
+in the certificate instead of `refs/tags/v1`, and the hub's identity check fails.
+
+| Input / secret     | Required | Meaning |
+|--------------------|----------|---------|
+| `target`           | yes      | What the results describe. The hub must trust the calling repository to publish under the namespace. |
+| `license`          | yes      | SPDX expression. The hub rejects unlicensed bundles. |
+| `config` (input)   | one of   | Path in the caller's checkout to a pvtr config with exactly one target. |
+| `config` (secret)  | one of   | The same config inline, for plugins whose vars carry secrets. |
+| `hub-url`          | no       | Defaults to `https://hub.grc.store`. |
+
+## What the workflow does
+
+1. Installs a pinned, checksum-verified pvtr release.
+2. `pvtr install --from-config` into a fresh directory: the plugin is pulled
+   from grc.store and verified (signature, signer identity, digest chain)
+   before it is written. Plugins from anywhere else are refused at publish.
+3. `pvtr run`, forced to gemara output through `PVTR_*` env. The run's exit
+   code is captured, not acted on.
+4. Checks out this repo at the SHA of the workflow file and runs the
+   publisher (`main.go`). Pass and fail both publish; abort, error, and usage
+   failures publish nothing.
+5. Exits with the run's exit code so the job reflects the evaluation.
+
+## What the publisher does
+
+All of this is validated before the first network call, so a bad input fails
+with nothing pushed:
+
+- One target per run: `<write-dir>` must hold exactly one service directory.
+- Each log in the run becomes one bundle at the coordinate
+  [grc-store-protocol](https://github.com/revanite-io/grc-store-protocol)'s
+  `slug` package defines:
+  `<namespace>/<target-id>-<catalog-id>:<version>-<UTC run timestamp>`.
+- `metadata.id` becomes `<target-id>_<catalog-id>` and `metadata.version` the
+  tag, stamped here so every plugin lands at the same coordinate shape. The
+  log body stays pure Gemara; the binding data rides in the provenance referrer.
+- `metadata.author` is left as the plugin wrote it, and must equal the
+  coordinate of the plugin that was installed. The hub ranks a log verified
+  only when its author names the coordinate the provenance binds, so a
+  mismatch is refused rather than published unverified.
+- The SLSA provenance carries an `evaluator` binding: the plugin's grc.store
+  coordinate and released index digest from pvtr's install manifest, the
+  target, and the run id.
+- Output older than the run start is refused as a leftover.
+
+The publish sequence itself (mint, pack, push, sign, provenance, sync) is
+[grc-store-clientkit](https://github.com/gemaraproj/grc-store-clientkit)'s
+`bundle.Publish`. Two independent tokens: the hub bearer is the job's OIDC
+token (trusted publishing, no stored secret), the signing identity is a
+separate OIDC token for public-good Fulcio.
+
+## What verified does not prove
+
+It proves *this plugin ran unmodified on a GitHub-hosted runner*. It does not
+prove *these results describe the target named*: a plugin evaluating a cloud
+account through credentials can be pointed at a decoy by the caller's config.
+That is a hub policy and namespace-ownership question, not a signing one.
+
+## Not here yet
+
+- Hub-side: accept a bundle as verified only when the certificate identity
+  matches the trust root; cross-check the claimed evaluator digest against the
+  coordinate's released digests; decide how tiers are displayed.
+- An org admin must bind the *calling* repository to the target namespace as
+  a CI publisher (hub ADR-0032). The hub reads the caller's repository from
+  the OIDC token; this workflow's own repository needs no binding.
+
+## Development
+
+```sh
+go test -race ./... && go vet ./... && test -z "$(gofmt -l .)"
+```
+
+Every commit carries a DCO `Signed-off-by` trailer (`git commit -s`).
