@@ -1,0 +1,37 @@
+header:
+  schema-version: 2.0.0
+  last-updated: '2026-09-05'
+  last-reviewed: '2026-09-05'
+  url: https://github.com/revanite-io/pvtr-publish-results/blob/main/security-insights.yml
+  comment: Security Insights for the pvtr-publish-results reusable workflow.
+
+project:
+  name: pvtr-publish-results
+  homepage: https://github.com/revanite-io/pvtr-publish-results
+  administrators:
+    - name: Eddie Knight
+      affiliation: Revanite
+      primary: true
+  repositories:
+    - name: pvtr-publish-results
+      url: https://github.com/revanite-io/pvtr-publish-results
+      comment: The reusable workflow and its publisher; the repository is the trust root.
+  vulnerability-reporting:
+    reports-accepted: true
+    bug-bounty-available: false
+    comment: Report vulnerabilities privately through the repository's Security tab.
+  documentation:
+    detailed-guide: https://github.com/revanite-io/pvtr-publish-results/blob/main/README.md
+
+repository:
+  url: https://github.com/revanite-io/pvtr-publish-results
+  status: active
+  accepts-change-request: true
+  accepts-automated-change-request: true
+  core-team:
+    - name: Eddie Knight
+      affiliation: Revanite
+      primary: true
+  license:
+    url: https://github.com/revanite-io/pvtr-publish-results/blob/main/LICENSE
+    expression: Apache-2.0
