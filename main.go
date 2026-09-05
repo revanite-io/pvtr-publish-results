@@ -17,6 +17,10 @@
 // metadata.version are stamped here so every plugin lands at the same
 // coordinate shape; metadata.author is left exactly as the plugin wrote it,
 // and must name the plugin that was actually installed.
+//
+// The log is handled as ordered YAML, never decoded into a Gemara struct:
+// plugins are built on whatever go-gemara they pin, and the publisher must
+// pass any of their output through byte-for-byte except the stamped fields.
 package main
 
 import (
@@ -166,11 +170,46 @@ type creds struct {
 }
 
 type stamped struct {
-	source     string // on-disk log file
-	sourceHash string
-	log        gemara.EvaluationLog
-	repository string
-	tag        string
+	source        string // on-disk log file
+	sourceHash    string
+	log           yaml.MapSlice
+	id            string // stamped metadata.id
+	gemaraVersion string
+	repository    string
+	tag           string
+}
+
+// field, str, and sub read an ordered YAML map; setField writes one key in
+// place, appending when absent, and returns the (possibly grown) slice.
+func field(m yaml.MapSlice, key string) (any, bool) {
+	for _, it := range m {
+		if k, ok := it.Key.(string); ok && k == key {
+			return it.Value, true
+		}
+	}
+	return nil, false
+}
+
+func str(m yaml.MapSlice, key string) string {
+	v, _ := field(m, key)
+	s, _ := v.(string)
+	return s
+}
+
+func sub(m yaml.MapSlice, key string) yaml.MapSlice {
+	v, _ := field(m, key)
+	s, _ := v.(yaml.MapSlice)
+	return s
+}
+
+func setField(m yaml.MapSlice, key string, v any) yaml.MapSlice {
+	for i := range m {
+		if k, ok := m[i].Key.(string); ok && k == key {
+			m[i].Value = v
+			return m
+		}
+	}
+	return append(m, yaml.MapItem{Key: key, Value: v})
 }
 
 // publish stamps and publishes every log of the run. Everything is read,
@@ -237,14 +276,14 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 func input(p params, s stamped, license, registry string) (bundle.Input, error) {
 	body, err := yaml.Marshal(s.log)
 	if err != nil {
-		return bundle.Input{}, fmt.Errorf("encoding %s: %w", s.log.Metadata.Id, err)
+		return bundle.Input{}, fmt.Errorf("encoding %s: %w", s.id, err)
 	}
-	filename := s.log.Metadata.Id + ".yaml"
+	filename := s.id + ".yaml"
 	pred := provenance.Build(provenance.Input{
 		Tool:           "pvtr-publish-results",
 		StartedOn:      p.startedOn,
 		ArtifactType:   gemara.EvaluationLogArtifact.String(),
-		ArtifactID:     s.log.Metadata.Id,
+		ArtifactID:     s.id,
 		ArtifactName:   filename,
 		ArtifactDigest: digest.FromBytes(body).String(),
 		SourceFiles:    map[string]string{s.source: s.sourceHash},
@@ -262,8 +301,8 @@ func input(p params, s stamped, license, registry string) (bundle.Input, error) 
 	return bundle.Input{
 		Filename:      filename,
 		ArtifactType:  gemara.EvaluationLogArtifact.String(),
-		ArtifactID:    s.log.Metadata.Id,
-		GemaraVersion: s.log.Metadata.GemaraVersion,
+		ArtifactID:    s.id,
+		GemaraVersion: s.gemaraVersion,
 		Body:          body,
 		License:       license,
 		Provenance:    pred,
@@ -322,8 +361,8 @@ func loadLogs(writeDir string, t target, startedOn time.Time, ev evaluator) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("reading gemara output: %w", err)
 	}
-	var logs []gemara.EvaluationLog
-	if err := yaml.Unmarshal(raw, &logs); err != nil {
+	var logs []yaml.MapSlice
+	if err := yaml.UnmarshalWithOptions(raw, &logs, yaml.UseOrderedMap()); err != nil {
 		return nil, fmt.Errorf("decoding %s: %w", source, err)
 	}
 	if len(logs) == 0 {
@@ -333,25 +372,29 @@ func loadLogs(writeDir string, t target, startedOn time.Time, ev evaluator) ([]s
 	sourceHash := digest.FromBytes(raw).String()
 	out := make([]stamped, 0, len(logs))
 	for _, log := range logs {
+		metadata := sub(log, "metadata")
+		id := str(metadata, "id")
 		// The plugin stamps metadata.id as <service>_<catalog>; the catalog
 		// half is what this log is about.
-		catalog := strings.TrimPrefix(log.Metadata.Id, svc+"_")
-		if catalog == "" || catalog == log.Metadata.Id {
-			return nil, fmt.Errorf("log id %q is not <%s>_<catalog-id>", log.Metadata.Id, svc)
+		catalog := strings.TrimPrefix(id, svc+"_")
+		if catalog == "" || catalog == id {
+			return nil, fmt.Errorf("log id %q is not <%s>_<catalog-id>", id, svc)
 		}
-		if log.Metadata.Author.Id != ev.Coordinate {
-			return nil, fmt.Errorf("log %q names author %q, but the installed plugin is %q; the hub would not rank it verified", log.Metadata.Id, log.Metadata.Author.Id, ev.Coordinate)
+		if author := str(sub(metadata, "author"), "id"); author != ev.Coordinate {
+			return nil, fmt.Errorf("log %q names author %q, but the installed plugin is %q; the hub would not rank it verified", id, author, ev.Coordinate)
 		}
 		repository := slug.EvaluationLogRepository(t.Namespace, t.ID, catalog)
 		if err := (registry.Reference{Repository: repository}).ValidateRepository(); err != nil {
 			return nil, fmt.Errorf("catalog id %q does not make a legal OCI repository: %w", catalog, err)
 		}
-		log.Metadata.Id = t.ID + "_" + catalog
-		log.Metadata.Version = tag
-		if log.Target.Version == "" {
-			log.Target.Version = t.Version
+		id = t.ID + "_" + catalog
+		metadata = setField(metadata, "id", id)
+		metadata = setField(metadata, "version", tag)
+		log = setField(log, "metadata", metadata)
+		if target := sub(log, "target"); target != nil && str(target, "version") == "" {
+			log = setField(log, "target", setField(target, "version", t.Version))
 		}
-		out = append(out, stamped{source: source, sourceHash: sourceHash, log: log, repository: repository, tag: tag})
+		out = append(out, stamped{source: source, sourceHash: sourceHash, log: log, id: id, gemaraVersion: str(metadata, "gemara-version"), repository: repository, tag: tag})
 	}
 	return out, nil
 }

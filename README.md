@@ -105,7 +105,9 @@ with nothing pushed:
   `<namespace>/<target-id>-<catalog-id>:<version>-<UTC run timestamp>`.
 - `metadata.id` becomes `<target-id>_<catalog-id>` and `metadata.version` the
   tag, stamped here so every plugin lands at the same coordinate shape. The
-  log body stays pure Gemara; the binding data rides in the provenance referrer.
+  log is handled as ordered YAML and never decoded into a Gemara struct, so a
+  plugin's output passes through on whatever go-gemara it was built with. The
+  binding data rides in the provenance referrer.
 - `metadata.author` is left as the plugin wrote it, and must equal the
   coordinate of the plugin that was installed. The hub ranks a log verified
   only when its author names the coordinate the provenance binds, so a

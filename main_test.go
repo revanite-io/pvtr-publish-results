@@ -183,6 +183,47 @@ func TestPublish_FailsClosedBeforeNetwork(t *testing.T) {
 	}
 }
 
+// The log is a plugin's artifact on its own go-gemara version. Fields the
+// publisher does not stamp, including ones no struct here knows, must pass
+// through untouched, and go-gemara's func-typed assessment steps must not
+// break decoding.
+func TestPublish_PassesUnknownFieldsThrough(t *testing.T) {
+	p, calls := stubbed(t)
+	raw := `- metadata:
+    id: svc_cat
+    type: EvaluationLog
+    gemara-version: v1.0.0
+    author:
+      id: acme/scanner
+    future-field: kept
+  result: Failed
+  evaluations:
+  - assessment-logs:
+    - steps:
+      - github.com/privateerproj/privateer-sdk/pluginkit.adaptTypedSteps[...].func1
+  target:
+    id: svc
+`
+	if err := os.MkdirAll(filepath.Join(p.writeDir, "svc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.writeDir, "svc", "svc.yaml"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := publish(context.Background(), io.Discard, p); err != nil {
+		t.Fatal(err)
+	}
+	body := string((*calls)[0].in.Body)
+	for _, want := range []string{"future-field: kept", "adaptTypedSteps[...].func1", "id: my-repo_cat", "version: 1.2.3-20260904T101500Z", "  version: 1.2.3"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body lacks %q:\n%s", want, body)
+		}
+	}
+	if (*calls)[0].in.GemaraVersion != "v1.0.0" || (*calls)[0].in.ArtifactID != "my-repo_cat" {
+		t.Errorf("input = %+v", (*calls)[0].in)
+	}
+}
+
 func TestPublish_DryRunWritesLayoutsWithoutCredentials(t *testing.T) {
 	p, calls := stubbed(t, "osps-baseline", "other")
 	p.dryRun = t.TempDir()
