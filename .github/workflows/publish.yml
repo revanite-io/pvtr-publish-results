@@ -28,6 +28,10 @@ on:
         description: Path in the caller's checkout of a pvtr config naming exactly one target. Mutually exclusive with the config secret.
         type: string
         required: false
+      hub:
+        description: "grc.store hub to install the plugin from and publish to. Exactly https://hub.grc.store (default, accepts @v1) or https://hub.preview.grc.store (accepts @v1.0.0-rc); anything else fails before pvtr runs."
+        type: string
+        default: https://hub.grc.store
       dry-run:
         description: Run everything but the publish. Bundles are written to OCI layouts and uploaded as the pvtr-bundles artifact; nothing is signed or sent to the hub.
         type: boolean
@@ -53,16 +57,21 @@ jobs:
       # PVTR_* is read by pvtr and by the plugin it spawns (viper AutomaticEnv),
       # which is how the run is forced to gemara output without editing the
       # caller's config. Env outranks the config file, so the caller cannot
-      # redirect the hub, the output format, or the paths from there.
+      # redirect the hub, the output format, or the paths from there. The hub
+      # input is limited to the two grc.store hubs by the first step.
       PVTR_OUTPUT: gemara
       PVTR_WRITE: "true"
-      PVTR_HUB_URL: https://hub.grc.store
+      PVTR_HUB_URL: ${{ inputs.hub }}
     steps:
       - name: Resolve config and paths
         env:
           CONFIG_PATH: ${{ inputs.config }}
           CONFIG_INLINE: ${{ secrets.config }}
         run: |
+          case "$PVTR_HUB_URL" in
+            https://hub.grc.store|https://hub.preview.grc.store) ;;
+            *) echo "::error::hub must be https://hub.grc.store or https://hub.preview.grc.store, got '$PVTR_HUB_URL'"; exit 1 ;;
+          esac
           {
             echo "PVTR_WRITE_DIRECTORY=$RUNNER_TEMP/results"
             echo "PVTR_BINARIES_PATH=$RUNNER_TEMP/plugins"
@@ -200,10 +209,12 @@ jobs:
           EVALUATOR_DIGEST: ${{ needs.run.outputs.evaluator-digest }}
           STARTED_AT: ${{ needs.run.outputs.started-at }}
           EXIT_CODE: ${{ needs.run.outputs.exit-code }}
+          HUB_URL: ${{ inputs.hub }}
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
           if [ "$DRY_RUN" = true ]; then set -- --dry-run "$RUNNER_TEMP/bundles"; fi
           go run . "$@" \
+            --hub-url "$HUB_URL" \
             --write-directory "$RUNNER_TEMP/results" \
             --evaluator-coordinate "$EVALUATOR_COORDINATE" \
             --evaluator-digest "$EVALUATOR_DIGEST" \

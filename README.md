@@ -52,9 +52,9 @@ secret gets its config inline instead:
 Reference the workflow by tag, not by commit SHA. A SHA-pinned call puts the SHA
 in the certificate instead of `refs/tags/v1`, and the hub's identity check fails.
 The hub is configured with exactly one accepted tag per environment: production
-accepts `v1`, and `preview.grc.store` accepts the pre-release tag `v1.0.0-rc`.
-Callers publishing to preview use `@v1.0.0-rc`; each environment rejects the
-other's tag.
+accepts `v1`, and `hub.preview.grc.store` accepts the pre-release tag `v1.0.0-rc`.
+Callers publishing to preview use `@v1.0.0-rc` with
+`hub: https://hub.preview.grc.store`; each environment rejects the other's tag.
 
 | Input / secret     | Required | Meaning |
 |--------------------|----------|---------|
@@ -62,10 +62,13 @@ other's tag.
 | `license`          | yes      | SPDX expression. The hub rejects unlicensed bundles. |
 | `config` (input)   | one of   | Path in the caller's checkout to a pvtr config with exactly one target. |
 | `config` (secret)  | one of   | The same config inline, for plugins whose vars carry secrets. |
+| `hub`              | no       | `https://hub.grc.store` (default) or `https://hub.preview.grc.store`. Any other value fails before pvtr runs. |
 | `dry-run`          | no       | Run everything but the publish; bundles land in the `pvtr-bundles` artifact as OCI layouts. Nothing is signed or sent. |
 
-The hub is not an input. It is part of what "verified" means, so it is fixed
-to `https://hub.grc.store` in the workflow.
+The hub is not free-form. It is part of what "verified" means: the plugin is
+installed from it and the result is published to it, so an arbitrary hub could
+feed the run a plugin of its own choosing and collect a bundle signed by this
+workflow. Only the two grc.store hubs are accepted.
 
 ## What the workflow does
 
