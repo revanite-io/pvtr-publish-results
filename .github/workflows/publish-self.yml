@@ -1,0 +1,36 @@
+# Not a reusable workflow
+# This publishes the OSPS Baseline results for this repository, using this repository
+# It uses a workflow dispatch to allow for manual QA of the reusable workflow
+name: Publish results to preview
+on:
+  workflow_dispatch:
+    inputs:
+      hub:
+        description: "grc.store hub to install the plugin from and publish to. Exactly https://hub.grc.store (default, accepts @v1) or https://hub.preview.grc.store (accepts @v1.0.0-rc); anything else fails before pvtr runs."
+        type: string
+        default: https://preview.hub.grc.store
+
+permissions: {}
+  
+jobs:
+  publish:
+    permissions:
+      contents: read
+      id-token: write
+    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1.0.0-rc
+    with:
+      target: revanite-io/pvtr-publish-results@1.0.0-rc
+      license: CC0-1.0
+      hub: ${{ inputs.hub }}
+    secrets:
+      config: |
+        services:
+          pvtr-publish-results:
+            plugin: openssf/github-repo
+            policy:
+              catalogs: [osps-baseline]
+              applicability: [maturity-1]
+            vars:
+              owner: revanite-io
+              repo: pvtr-publish-results
+              token: ${{ secrets.GITHUB_TOKEN }}
