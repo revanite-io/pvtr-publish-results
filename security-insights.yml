@@ -35,3 +35,12 @@ repository:
   license:
     url: https://github.com/revanite-io/pvtr-publish-results/blob/main/LICENSE
     expression: Apache-2.0
+  security:
+    tools:
+      - name: GitHub secret scanning
+        type: secret-scanning
+        comment: Enabled with push protection on the repository.
+        integration:
+          adhoc: false
+          ci: true
+          release: false
