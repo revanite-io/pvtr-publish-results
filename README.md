@@ -150,8 +150,9 @@ That is a hub policy and namespace-ownership question, not a signing one.
 ## Repository governance
 
 The repo is the trust root, so its settings are part of the design. Rulesets
-require a pull request and a green `test` check on `main`, forbid force
-pushes, and restrict `v*` tags to repository admins. Only GitHub-authored
+require a pull request with one approving review and a green `test` check on
+`main`, forbid force pushes, and restrict `v*` tags to repository admins;
+repository admins may bypass. Only GitHub-authored
 actions may run, the default workflow token is read-only, fork pull requests
 from outside collaborators need approval before their workflows run, and
 secret scanning with push protection is on. Dependabot keeps the pinned
