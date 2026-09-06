@@ -15,7 +15,7 @@ project:
   repositories:
     - name: pvtr-publish-results
       url: https://github.com/revanite-io/pvtr-publish-results
-      comment: The reusable workflow and its publisher; the repository is the trust root.
+      comment: The reusable workflow and its publication logic.
   vulnerability-reporting:
     reports-accepted: true
     bug-bounty-available: false
