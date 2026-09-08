@@ -391,9 +391,17 @@ func loadLogs(writeDir string, t target, startedOn time.Time, ev evaluator) ([]s
 		metadata = setField(metadata, "id", id)
 		metadata = setField(metadata, "version", tag)
 		log = setField(log, "metadata", metadata)
-		if target := sub(log, "target"); target != nil && str(target, "version") == "" {
-			log = setField(log, "target", setField(target, "version", t.Version))
+		// The plugin names the target its own way (github-repo writes
+		// github.com/<owner>/<repo>); the hub wants the registered coordinate
+		// (ADR-0053 gate 4: target.id == <namespace>/<target-id>). --target is
+		// the coordinate, so stamp it. The version is filled only when the
+		// plugin left it blank.
+		tgt := sub(log, "target")
+		tgt = setField(tgt, "id", t.Namespace+"/"+t.ID)
+		if str(tgt, "version") == "" {
+			tgt = setField(tgt, "version", t.Version)
 		}
+		log = setField(log, "target", tgt)
 		out = append(out, stamped{source: source, sourceHash: sourceHash, log: log, id: id, gemaraVersion: str(metadata, "gemara-version"), repository: repository, tag: tag})
 	}
 	return out, nil

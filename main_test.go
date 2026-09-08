@@ -202,7 +202,7 @@ func TestPublish_PassesUnknownFieldsThrough(t *testing.T) {
     - steps:
       - github.com/privateerproj/privateer-sdk/pluginkit.adaptTypedSteps[...].func1
   target:
-    id: svc
+    id: github.com/acme/svc
 `
 	if err := os.MkdirAll(filepath.Join(p.writeDir, "svc"), 0o755); err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestPublish_PassesUnknownFieldsThrough(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string((*calls)[0].in.Body)
-	for _, want := range []string{"future-field: kept", "adaptTypedSteps[...].func1", "id: my-repo_cat", "version: 1.2.3-20260904T101500Z", "  version: 1.2.3"} {
+	for _, want := range []string{"future-field: kept", "adaptTypedSteps[...].func1", "id: my-repo_cat", "version: 1.2.3-20260904T101500Z", "  version: 1.2.3", "  id: acme/my-repo\n"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body lacks %q:\n%s", want, body)
 		}
