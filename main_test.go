@@ -377,3 +377,36 @@ func TestIndexedBy(t *testing.T) {
 		})
 	}
 }
+
+// The job no longer exits with the evaluation's verdict, so the publisher
+// has to print it: a Failed baseline is a successful publication.
+func TestPublish_PrintsTheResultAndSucceedsOnAFailedBaseline(t *testing.T) {
+	p, calls := stubbed(t)
+	p.runExitCode = testFail
+	raw := `- metadata:
+    id: svc_cat
+    type: EvaluationLog
+    gemara-version: v1.0.0
+    author:
+      id: acme/scanner
+  result: Failed
+  target:
+    id: svc
+`
+	if err := os.MkdirAll(filepath.Join(p.writeDir, "svc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.writeDir, "svc", "svc.yaml"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := publish(context.Background(), &out, p); err != nil {
+		t.Fatalf("a failing baseline is a successful publication: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("published %d bundles, want 1", len(*calls))
+	}
+	if !strings.Contains(out.String(), "result=Failed") {
+		t.Errorf("output does not carry the verdict:\n%s", out.String())
+	}
+}

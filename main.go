@@ -295,7 +295,10 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 			}
 			return fmt.Errorf("publishing %s:%s: %w", s.repository, s.tag, err)
 		}
-		_, _ = fmt.Fprintf(w, "Published %s:%s (signed=%t attested=%t)\n", s.repository, s.tag, res.Signed, res.Attested)
+		// The job's status reports publication, not the evaluation, so the
+		// verdict has to be visible here or it is not visible at all.
+		_, _ = fmt.Fprintf(w, "Published %s:%s (result=%s signed=%t attested=%t)\n",
+			s.repository, s.tag, str(s.log, "result"), res.Signed, res.Attested)
 	}
 	return nil
 }

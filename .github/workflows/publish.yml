@@ -236,9 +236,9 @@ jobs:
           path: ${{ runner.temp }}/bundles
           if-no-files-found: error
 
-      # Failing results are published (they are the honest record) and then
-      # the job still reports the run's outcome.
-      - name: Report the run's outcome
-        env:
-          EXIT_CODE: ${{ needs.run.outputs.exit-code }}
-        run: exit "$EXIT_CODE"
+      # The job's status reports PUBLICATION, not the evaluation. A failing
+      # baseline is a real result and publishing it is a success; only a
+      # failure to produce or land the log turns this job red. Read the
+      # result from the log itself: the publish step prints it, the run job's
+      # log carries pvtr's own output, and the hub's target page holds the
+      # landed record. Never from this job's colour.

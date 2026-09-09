@@ -98,7 +98,11 @@ reaches the publisher except the results themselves.
    file (`job.workflow_sha`, refused if empty), and runs the publisher
    (`main.go`) with the evaluator binding from job outputs. Pass and fail
    both publish; abort, error, and usage failures publish nothing.
-7. Exits with the run's exit code so the job reflects the evaluation.
+7. Succeeds when the log is published. **The job's status reports publication, not the
+   evaluation**: a failing baseline is an honest result and still exits 0. Only a failure to
+   produce or land the log is red — a plugin that aborted (any exit code other than pass or
+   fail), a rejected publish, a hub that refused the bundle. Read the verdict from the log on
+   the hub, not from this job's colour.
 
 ## What the publisher does
 
