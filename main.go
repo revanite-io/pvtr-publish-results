@@ -24,11 +24,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,6 +164,7 @@ type params struct {
 	// Test seams: nil selects the real clientkit sequence.
 	publish      func(context.Context, bundle.Input, bundle.Target, *keyless.Signer) (*bundle.Published, error)
 	resolveCreds func(context.Context, io.Writer, string) (creds, error)
+	ensureTarget func(context.Context, io.Writer, params, string) error
 }
 
 type creds struct {
@@ -249,6 +253,13 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 	}
 	c, err := resolve(ctx, w, p.hubURL)
 	if err != nil {
+		return err
+	}
+	ensure := p.ensureTarget
+	if ensure == nil {
+		ensure = ensureTarget
+	}
+	if err := ensure(ctx, w, p, c.bearer); err != nil {
 		return err
 	}
 
@@ -405,6 +416,62 @@ func loadLogs(writeDir string, t target, startedOn time.Time, ev evaluator) ([]s
 		out = append(out, stamped{source: source, sourceHash: sourceHash, log: log, id: id, gemaraVersion: str(metadata, "gemara-version"), repository: repository, tag: tag})
 	}
 	return out, nil
+}
+
+// ensureTarget registers the target the results describe and proves the
+// caller owns it, so a repo's only onboarding step is the CI-publisher
+// binding. The hub accepts an EvaluationLog only against a registered,
+// ownership-verified target (ADR-0053 gates 9-10), and github-oidc is the
+// one proof a GitHub repo can give: the bearer's repository claim must equal
+// the target uri, and only this job holds that bearer. The upsert is
+// idempotent — the hub keeps verified_at unless the uri changes — and verify
+// runs only while the row is unverified (it is rate-limited per target).
+func ensureTarget(ctx context.Context, w io.Writer, p params, bearer string) error {
+	repo := os.Getenv("GITHUB_REPOSITORY")
+	if repo == "" {
+		return errors.New("GITHUB_REPOSITORY is unset; the target is this job's repository")
+	}
+	base := strings.TrimRight(p.hubURL, "/") + "/v1/targets/" + p.target.Namespace + "/" + p.target.ID
+	var detail struct {
+		VerifiedAt *time.Time `json:"verified_at"`
+	}
+	body := map[string]string{"name": p.target.ID, "uri": "https://github.com/" + repo}
+	if err := hubJSON(ctx, bearer, base, body, &detail); err != nil {
+		return fmt.Errorf("registering target %s/%s: %w", p.target.Namespace, p.target.ID, err)
+	}
+	if detail.VerifiedAt != nil {
+		return nil
+	}
+	if err := hubJSON(ctx, bearer, base+"/verify", map[string]string{"method": "github-oidc"}, &detail); err != nil {
+		return fmt.Errorf("verifying target %s/%s as %s: %w", p.target.Namespace, p.target.ID, repo, err)
+	}
+	_, _ = fmt.Fprintf(w, "Verified target %s/%s is %s\n", p.target.Namespace, p.target.ID, repo)
+	return nil
+}
+
+// hubJSON POSTs one JSON body with the hub bearer and decodes a 2xx reply;
+// anything else surfaces the hub's error body verbatim.
+func hubJSON(ctx context.Context, bearer, url string, in, out any) error {
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	reply, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("hub returned %d: %s", resp.StatusCode, bytes.TrimSpace(reply))
+	}
+	return json.Unmarshal(reply, out)
 }
 
 // resolveCreds resolves the two independent identities a publish needs: the

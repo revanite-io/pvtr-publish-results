@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,10 +58,11 @@ func stubbed(t *testing.T, catalogs ...string) (params, *[]call) {
 	calls := &[]call{}
 	return params{
 		hubURL: "https://hub.example", writeDir: filepath.Join(dir, "results"),
-		evaluator: evaluator{Coordinate: "acme/scanner", IndexDigest: "sha256:" + strings.Repeat("ab", 32)},
-		target:    target{Namespace: "acme", ID: "my-repo", Version: "1.2.3"},
-		license:   "CC0-1.0",
-		startedOn: time.Date(2026, 9, 4, 10, 15, 0, 0, time.UTC),
+		evaluator:    evaluator{Coordinate: "acme/scanner", IndexDigest: "sha256:" + strings.Repeat("ab", 32)},
+		target:       target{Namespace: "acme", ID: "my-repo", Version: "1.2.3"},
+		license:      "CC0-1.0",
+		startedOn:    time.Date(2026, 9, 4, 10, 15, 0, 0, time.UTC),
+		ensureTarget: func(context.Context, io.Writer, params, string) error { return nil },
 		resolveCreds: func(context.Context, io.Writer, string) (creds, error) {
 			return creds{bearer: "b", registry: "reg.example", signer: &keyless.Signer{IDToken: "tok"}}, nil
 		},
@@ -256,5 +259,54 @@ func TestPublish_StopsAtFirstFailureNamingTheTrustGap(t *testing.T) {
 	}
 	if len(*calls) != 1 {
 		t.Errorf("publishing must stop at the first failure, got %d calls", len(*calls))
+	}
+}
+
+// ensureTarget registers, then verifies only while the hub says the row is
+// unverified: a second run must not spend the per-target verify budget.
+func TestEnsureTarget_RegistersThenVerifiesOnce(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY", "acme/my-repo")
+	var got []string
+	verified := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.Path+" "+string(b)+" "+r.Header.Get("Authorization"))
+		if strings.HasSuffix(r.URL.Path, "/verify") {
+			verified = true
+		}
+		if verified {
+			_, _ = io.WriteString(w, `{"verified_at":"2026-09-09T00:00:00Z"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"verified_at":null}`)
+	}))
+	defer srv.Close()
+	p := params{hubURL: srv.URL + "/", target: target{Namespace: "acme", ID: "my-repo", Version: "1"}}
+	for i := 0; i < 2; i++ {
+		if err := ensureTarget(context.Background(), io.Discard, p, "tok"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{
+		`POST /v1/targets/acme/my-repo {"name":"my-repo","uri":"https://github.com/acme/my-repo"} Bearer tok`,
+		`POST /v1/targets/acme/my-repo/verify {"method":"github-oidc"} Bearer tok`,
+		`POST /v1/targets/acme/my-repo {"name":"my-repo","uri":"https://github.com/acme/my-repo"} Bearer tok`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestEnsureTarget_SurfacesTheHubError(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY", "acme/my-repo")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(422)
+		_, _ = io.WriteString(w, `{"error":"target_verification_failed","detail":"the OIDC repository claim does not match"}`)
+	}))
+	defer srv.Close()
+	p := params{hubURL: srv.URL, target: target{Namespace: "acme", ID: "my-repo", Version: "1"}}
+	err := ensureTarget(context.Background(), io.Discard, p, "tok")
+	if err == nil || !strings.Contains(err.Error(), "422") || !strings.Contains(err.Error(), "target_verification_failed") {
+		t.Errorf("err = %v", err)
 	}
 }
