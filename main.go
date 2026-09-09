@@ -71,6 +71,7 @@ func main() {
 	flag.StringVar(&p.license, "license", "", "SPDX expression the logs are published under")
 	flag.StringVar(&startedAt, "started-at", "", "RFC 3339 time the pvtr run started; older output is refused")
 	flag.IntVar(&p.runExitCode, "run-exit-code", 0, "exit code of pvtr run")
+	flag.StringVar(&p.reportDir, "report-dir", "", "write a SARIF document per log to this directory; the job summary is written when GITHUB_STEP_SUMMARY is set. Neither is part of the publication")
 	flag.StringVar(&p.dryRun, "dry-run", "", "write the bundles to OCI layouts under this directory instead of publishing; no credentials, no signing, no network")
 	flag.Parse()
 
@@ -158,6 +159,7 @@ type params struct {
 	evaluator   evaluator
 	target      target
 	license     string // SPDX; canonicalized by publish
+	reportDir   string // SARIF output directory; empty writes none
 	startedOn   time.Time
 	runExitCode int
 	dryRun      string // OCI layout root; empty publishes for real
@@ -238,6 +240,10 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 	if err != nil {
 		return err
 	}
+
+	// Derived views first: they describe this run whether or not the publish
+	// that follows succeeds, and a dry run gets them too. They never fail it.
+	writeReports(w, p.reportDir, os.Getenv("GITHUB_STEP_SUMMARY"), logs)
 
 	// A dry run stops here: everything above has been validated, and the
 	// same bundles are written to disk (one layout per repository, since

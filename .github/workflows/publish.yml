@@ -36,6 +36,10 @@ on:
         description: Run everything but the publish. Bundles are written to OCI layouts and uploaded as the pvtr-bundles artifact; nothing is signed or sent to the hub.
         type: boolean
         default: false
+      upload-sarif:
+        description: "Upload the results to this repository's code scanning alerts. The caller's job must grant security-events: write. Skipped on a dry run; the SARIF is uploaded as the pvtr-sarif artifact either way."
+        type: boolean
+        default: false
     secrets:
       config:
         description: Inline pvtr config, for plugins whose vars carry secrets (pvtr reads vars from the config file only). Mutually exclusive with the config input.
@@ -226,7 +230,18 @@ jobs:
             --target "$TARGET" \
             --license "$LICENSE" \
             --started-at "$STARTED_AT" \
-            --run-exit-code "$EXIT_CODE"
+            --run-exit-code "$EXIT_CODE" \
+            --report-dir "$RUNNER_TEMP/sarif"
+
+      # Written from the same log that was published, so the artifact and the
+      # alerts describe exactly what landed. Absent when this publisher could
+      # not decode the plugin's log — a warning above, never a failure.
+      - name: Upload the SARIF
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pvtr-sarif
+          path: ${{ runner.temp }}/sarif
+          if-no-files-found: ignore
 
       - name: Upload the dry-run bundles
         if: inputs.dry-run
@@ -242,3 +257,43 @@ jobs:
       # result from the log itself: the publish step prints it, the run job's
       # log carries pvtr's own output, and the hub's target page holds the
       # landed record. Never from this job's colour.
+
+  # Code scanning lives in its own job: security-events: write has no business
+  # sitting in the job that holds the signing identity, and a caller that does
+  # not ask for the upload never dispatches this job, so it never has to grant
+  # the permission. Publication has already happened by here; nothing this job
+  # does can undo it, and nothing it fails at should turn the run red.
+  report:
+    needs: publish
+    if: ${{ inputs.upload-sarif && !inputs.dry-run }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pvtr-sarif
+          path: ${{ runner.temp }}/sarif
+
+      # Code scanning rejects a run carrying no results, and a log where every
+      # requirement was skipped legitimately produces one.
+      - name: Check the SARIF carries results
+        id: sarif
+        env:
+          SARIF_DIR: ${{ runner.temp }}/sarif
+        run: |
+          n=$(find "$SARIF_DIR" -name '*.sarif' -type f -print0 |
+              xargs -0 -r jq -s '[.[].runs[]?.results[]?] | length' 2>/dev/null)
+          echo "results=${n:-0}" >> "$GITHUB_OUTPUT"
+          if [ "${n:-0}" -eq 0 ]; then
+            echo "::warning::the SARIF carries no results; code scanning has nothing to ingest"
+          fi
+
+      - name: Upload to code scanning
+        if: steps.sarif.outputs.results != '0'
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+        with:
+          sarif_file: ${{ runner.temp }}/sarif
+          wait-for-processing: true

@@ -64,6 +64,7 @@ Callers publishing to preview use `@v1.0.0-rc` with
 | `config` (secret)  | one of   | The same config inline, for plugins whose vars carry secrets. |
 | `hub`              | no       | `https://hub.grc.store` (default) or `https://hub.preview.grc.store`. Any other value fails before pvtr runs. |
 | `dry-run`          | no       | Run everything but the publish; bundles land in the `pvtr-bundles` artifact as OCI layouts. Nothing is signed or sent. |
+| `upload-sarif`     | no       | Also send the results to the caller's code scanning alerts. Needs `security-events: write` on the calling job. Skipped on a dry run. |
 
 The hub is not free-form. It is part of what "verified" means: the plugin is
 installed from it and the result is published to it, so an arbitrary hub could
@@ -98,7 +99,8 @@ reaches the publisher except the results themselves.
    file (`job.workflow_sha`, refused if empty), and runs the publisher
    (`main.go`) with the evaluator binding from job outputs. Pass and fail
    both publish; abort, error, and usage failures publish nothing.
-7. Succeeds when the log is published. **The job's status reports publication, not the
+7. Writes the job summary and the SARIF (see [Reports](#reports)), then succeeds when the log is
+   published. **The job's status reports publication, not the
    evaluation**: a failing baseline is an honest result and still exits 0. Only a failure to
    produce or land the log is red — a plugin that aborted (any exit code other than pass or
    fail), a rejected publish, a hub that refused the bundle. Read the verdict from the log on
@@ -134,6 +136,45 @@ The publish sequence itself (mint, pack, push, sign, provenance, sync) is
 `bundle.Publish`. Two independent tokens: the hub bearer is the job's OIDC
 token (trusted publishing, no stored secret), the signing identity is a
 separate OIDC token for public-good Fulcio.
+
+## Reports
+
+Every run writes two views of the same stamped log it publishes, so a report
+can never describe something other than what landed:
+
+- **A job summary** — the coordinate, the verdict, the counts, and a row per
+  requirement — on the `publish` job, always.
+- **SARIF 2.1.0**, one document per log, in the `pvtr-sarif` artifact, always.
+  With `upload-sarif: true` a separate `report` job also sends it to the
+  caller's code scanning alerts.
+
+Both are derived, never load-bearing. Publishing passes the log through as
+ordered YAML on whatever go-gemara the plugin was built with; only these views
+decode it into this publisher's structs, and that is the one step here that a
+version gap can break. When it does, the run says so with a `::warning::` and
+publishes anyway.
+
+Code scanning is opt-in because it needs `security-events: write`, which the
+calling job must grant:
+
+```yaml
+jobs:
+  publish:
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write   # only for upload-sarif
+    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1
+    with:
+      target: my-org/my-repo@1.0.0
+      license: CC0-1.0
+      upload-sarif: true
+```
+
+The permission is granted to a job of its own that runs after the publish, not
+to the job holding the signing identity, and a caller that leaves the input
+`false` never dispatches that job and never has to grant it. A SARIF carrying
+no results is not uploaded: code scanning rejects it.
 
 ## What verified does not prove
 
