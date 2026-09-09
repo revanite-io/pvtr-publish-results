@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,6 +166,7 @@ type params struct {
 	publish      func(context.Context, bundle.Input, bundle.Target, *keyless.Signer) (*bundle.Published, error)
 	resolveCreds func(context.Context, io.Writer, string) (creds, error)
 	ensureTarget func(context.Context, io.Writer, params, string) error
+	indexedBy    func(context.Context, string, target, stamped) (string, error)
 }
 
 type creds struct {
@@ -263,10 +265,23 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 		return err
 	}
 
+	indexed := p.indexedBy
+	if indexed == nil {
+		indexed = indexedBy
+	}
 	for _, s := range logs {
 		in, err := input(p, s, license, c.registry)
 		if err != nil {
 			return err
+		}
+		// A re-run of this job alone reuses the run job's timestamp, so the
+		// tag is the same while a fresh signature changes the manifest; the
+		// hub refuses to replace a landed log. Look before signing.
+		if run, err := indexed(ctx, p.hubURL, p.target, s); err != nil {
+			return err
+		} else if run != "" {
+			_, _ = fmt.Fprintf(w, "Already indexed %s:%s (published by %s); nothing to do\n", s.repository, s.tag, run)
+			continue
 		}
 		t := bundle.Target{HubURL: p.hubURL, Repository: s.repository, Tag: s.tag, Bearer: c.bearer}
 		_, _ = fmt.Fprintf(w, "Publishing %s:%s\n", s.repository, s.tag)
@@ -274,6 +289,9 @@ func publish(ctx context.Context, w io.Writer, p params) error {
 		if err != nil {
 			if errors.Is(err, hub.ErrUnauthorized) || errors.Is(err, hub.ErrNoBearer) || errors.Is(err, bundle.ErrPushDenied) {
 				return fmt.Errorf("publishing %s:%s: %w: the hub does not trust %s to publish under namespace %q", s.repository, s.tag, err, os.Getenv("GITHUB_REPOSITORY"), p.target.Namespace)
+			}
+			if strings.Contains(err.Error(), "divergent_body") {
+				return fmt.Errorf("publishing %s:%s: %w: this tag was already published by an earlier attempt of this run and a landed log is immutable; re-running the publish job alone cannot replace it — re-run all jobs for a fresh result", s.repository, s.tag, err)
 			}
 			return fmt.Errorf("publishing %s:%s: %w", s.repository, s.tag, err)
 		}
@@ -416,6 +434,52 @@ func loadLogs(writeDir string, t target, startedOn time.Time, ev evaluator) ([]s
 		out = append(out, stamped{source: source, sourceHash: sourceHash, log: log, id: id, gemaraVersion: str(metadata, "gemara-version"), repository: repository, tag: tag})
 	}
 	return out, nil
+}
+
+// indexedBy returns the run that already indexed this stream tag on the hub,
+// or "" when it has not landed. The evaluations list is public and newest
+// first, filtered to the target version, so the tag is on the first page if
+// it exists at all. A 404 is "no target yet", not an error.
+func indexedBy(ctx context.Context, hubURL string, t target, s stamped) (string, error) {
+	u := strings.TrimRight(hubURL, "/") + "/v1/targets/" + t.Namespace + "/" + t.ID + "/evaluations?version=" + url.QueryEscape(t.Version)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("checking whether %s:%s is already indexed: %w", s.repository, s.tag, err)
+	}
+	defer resp.Body.Close()
+	reply, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if resp.StatusCode/100 != 2 {
+		return "", fmt.Errorf("checking whether %s:%s is already indexed: hub returned %d: %s", s.repository, s.tag, resp.StatusCode, bytes.TrimSpace(reply))
+	}
+	var page struct {
+		Items []struct {
+			LogNamespace string `json:"log_namespace"`
+			LogID        string `json:"log_id"`
+			LogVersion   string `json:"log_version"`
+			Signer       struct {
+				RunURI string `json:"run_uri"`
+			} `json:"signer"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(reply, &page); err != nil {
+		return "", fmt.Errorf("decoding the evaluations of %s/%s: %w", t.Namespace, t.ID, err)
+	}
+	for _, it := range page.Items {
+		if it.LogNamespace+"/"+it.LogID == s.repository && it.LogVersion == s.tag {
+			if it.Signer.RunURI == "" {
+				return "an earlier run", nil
+			}
+			return it.Signer.RunURI, nil
+		}
+	}
+	return "", nil
 }
 
 // ensureTarget registers the target the results describe and proves the

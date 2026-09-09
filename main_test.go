@@ -63,6 +63,7 @@ func stubbed(t *testing.T, catalogs ...string) (params, *[]call) {
 		license:      "CC0-1.0",
 		startedOn:    time.Date(2026, 9, 4, 10, 15, 0, 0, time.UTC),
 		ensureTarget: func(context.Context, io.Writer, params, string) error { return nil },
+		indexedBy:    func(context.Context, string, target, stamped) (string, error) { return "", nil },
 		resolveCreds: func(context.Context, io.Writer, string) (creds, error) {
 			return creds{bearer: "b", registry: "reg.example", signer: &keyless.Signer{IDToken: "tok"}}, nil
 		},
@@ -308,5 +309,71 @@ func TestEnsureTarget_SurfacesTheHubError(t *testing.T) {
 	err := ensureTarget(context.Background(), io.Discard, p, "tok")
 	if err == nil || !strings.Contains(err.Error(), "422") || !strings.Contains(err.Error(), "target_verification_failed") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// A publish-only re-run reuses the tag; if the hub already holds it, nothing
+// is signed or sent, and the output names the run that did.
+func TestPublish_SkipsATagTheHubAlreadyIndexed(t *testing.T) {
+	p, calls := stubbed(t, "cat")
+	p.indexedBy = func(_ context.Context, _ string, _ target, s stamped) (string, error) {
+		return "https://github.com/acme/web-api/actions/runs/1/attempts/1", nil
+	}
+	var out strings.Builder
+	if err := publish(context.Background(), &out, p); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("published %d bundles, want 0", len(*calls))
+	}
+	if !strings.Contains(out.String(), "Already indexed acme/my-repo-cat:1.2.3-20260904T101500Z (published by https://github.com/acme/web-api/actions/runs/1/attempts/1)") {
+		t.Errorf("output:\n%s", out.String())
+	}
+}
+
+func TestPublish_ExplainsADivergentBody409(t *testing.T) {
+	p, _ := stubbed(t, "cat")
+	p.publish = func(context.Context, bundle.Input, bundle.Target, *keyless.Signer) (*bundle.Published, error) {
+		return nil, errors.New(`hub sync returned 409: {"error":"divergent_body"}`)
+	}
+	err := publish(context.Background(), io.Discard, p)
+	if err == nil || !strings.Contains(err.Error(), "re-run all jobs") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestIndexedBy(t *testing.T) {
+	st := stamped{repository: "acme/my-repo-cat", tag: "1.2.3-20260904T101500Z"}
+	tg := target{Namespace: "acme", ID: "my-repo", Version: "1.2.3"}
+	body := `{"items":[{"log_namespace":"acme","log_id":"my-repo-cat","log_version":"1.2.3-20260904T101500Z","signer":{"run_uri":"https://github.com/acme/web-api/actions/runs/1/attempts/1"}}]}`
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		want    string
+		wantErr bool
+	}{
+		{"indexed", 200, body, "https://github.com/acme/web-api/actions/runs/1/attempts/1", false},
+		{"other tag only", 200, strings.Replace(body, "T101500Z", "T090000Z", 1), "", false},
+		{"no target yet", 404, `{"error":"not_found"}`, "", false},
+		{"hub error", 500, `{"error":"store_error"}`, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.RequestURI()
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			got, err := indexedBy(context.Background(), srv.URL, tg, st)
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Errorf("got %q, %v; want %q, err=%v", got, err, tc.want, tc.wantErr)
+			}
+			if gotPath != "/v1/targets/acme/my-repo/evaluations?version=1.2.3" {
+				t.Errorf("path = %s", gotPath)
+			}
+		})
 	}
 }
