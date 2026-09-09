@@ -19,7 +19,7 @@ jobs:
       id-token: write
     uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1.0.0-rc
     with:
-      target: revanite-io/pvtr-publish-results@1.0.0-rc
+      target: revanite-io/pvtr-publish-results@1.0.0-rc1
       license: CC0-1.0
       hub: ${{ inputs.hub }}
     secrets:
