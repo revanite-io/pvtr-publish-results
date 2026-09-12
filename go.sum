@@ -256,8 +256,8 @@ github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c h1:+mdjkGKdHQG3305AYmd
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c/go.mod h1:7rwL4CYBLnjLxUqIJNnCWiEdr3bn6IUYi15bNlnbCCU=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
-github.com/revanite-io/grc-store-protocol v0.6.0 h1:VcsI3f3Gv2Vrd9ZI1M2Gryol8PuByO4w/MJg1fh2/s8=
-github.com/revanite-io/grc-store-protocol v0.6.0/go.mod h1:naeWSRGJ9dtyzndHdsA4jrENlSmSlIgLQDAKRSpPhwU=
+github.com/revanite-io/grc-store-protocol v0.7.0 h1:5MH9aC9iJGOqf0daFn5gHTlk7IXEsHDWp7P1KBpmZ88=
+github.com/revanite-io/grc-store-protocol v0.7.0/go.mod h1:naeWSRGJ9dtyzndHdsA4jrENlSmSlIgLQDAKRSpPhwU=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
