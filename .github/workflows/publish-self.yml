@@ -17,7 +17,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1.0.0-rc
+    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1.0.0-rc1
     with:
       target: revanite-io/pvtr-publish-results@1.0.0-rc1
       license: CC0-1.0
