@@ -1,6 +1,6 @@
 # pvtr-publish-results
 
-A reusable GitHub Actions workflow that runs one [pvtr](https://github.com/privateerproj/privateer)
+A reusable GitHub Actions workflow that runs one [pvtr](https://github.com/privateerproj/pvtr)
 plugin against one target and publishes the resulting Gemara EvaluationLogs to
 [grc.store](https://grc.store) as signed OCI bundles.
 
