@@ -101,16 +101,16 @@ jobs:
 
       - name: Install pvtr
         env:
-          PVTR_VERSION: v0.23.0
-          PVTR_SHA256: 79f69ca91470d99269f957703784b57de532f0a242d9c3c442ff0b0d266564f8 # pvtr_Linux_x86_64.tar.gz
+          PVTR_VERSION: v0.23.2
+          PVTR_SHA256: dae63a6ceffe17af38c1c75a99f0c577a7ed85eb96bfcf7893245b7522b9dd89 # pvtr_Linux_x86_64.tar.gz
           GH_TOKEN: ${{ github.token }} # attestation lookup only
         run: |
           mkdir -p "$TOOL_DIR" && cd "$TOOL_DIR"
-          curl -sSfL -o pvtr.tar.gz "https://github.com/privateerproj/privateer/releases/download/$PVTR_VERSION/pvtr_Linux_x86_64.tar.gz"
+          curl -sSfL -o pvtr.tar.gz "https://github.com/privateerproj/pvtr/releases/download/$PVTR_VERSION/pvtr_Linux_x86_64.tar.gz"
           echo "$PVTR_SHA256  pvtr.tar.gz" | sha256sum -c -
           # pvtr is built by a reusable workflow, so the certificate names it,
-          # not privateerproj/privateer; --repo still checks the source repo.
-          gh attestation verify pvtr.tar.gz --repo privateerproj/privateer \
+          # not privateerproj/pvtr; --repo still checks the source repo.
+          gh attestation verify pvtr.tar.gz --repo privateerproj/pvtr \
             --signer-workflow github-community-projects/ospo-reusable-workflows/.github/workflows/release.yaml
           tar -xzf pvtr.tar.gz pvtr
           echo "$TOOL_DIR" >> "$GITHUB_PATH"
