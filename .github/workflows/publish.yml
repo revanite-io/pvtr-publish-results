@@ -233,10 +233,11 @@ jobs:
       # describes exactly what landed. Absent when this publisher could not
       # decode the plugin's log — a warning above, never a failure.
       #
-      # Sending it to code scanning is the caller's job (see the README). A
-      # job here asking for security-events: write would make every caller
-      # grant it: GitHub checks a called workflow's permissions against the
-      # caller's before it evaluates any if:, and fails the run at startup.
+      # code-scanning.yml sends it to code scanning, called by the caller as
+      # a job of its own. A job here asking for security-events: write would
+      # make every caller grant it: GitHub checks a called workflow's
+      # permissions against the caller's before it evaluates any if:, and
+      # fails the run at startup.
       - name: Upload the SARIF
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

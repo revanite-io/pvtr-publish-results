@@ -1,0 +1,68 @@
+# Reusable workflow: send the SARIF that publish.yml wrote to the caller's
+# code scanning alerts. Callers run it as a job of their own, after the job
+# that calls publish.yml:
+#
+#   code-scanning:
+#     needs: publish
+#     permissions:
+#       actions: read
+#       contents: read
+#       security-events: write
+#     uses: revanite-io/pvtr-publish-results/.github/workflows/code-scanning.yml@v1
+#
+# It is a separate workflow, not a job in publish.yml, because GitHub checks a
+# called workflow's permissions against the caller's grant before it
+# evaluates any if:. A job there asking for security-events: write would make
+# every caller grant it, and fail the run at startup when they do not. Here
+# only the callers who want alerts grant it.
+#
+# Nothing here signs or publishes, so it adds nothing to the trust root.
+name: Upload results to code scanning
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  upload:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read # upload-sarif reads the run's details; required in private repos
+      contents: read
+      security-events: write
+    steps:
+      # Missing when the publisher could not decode the plugin's log; the
+      # publish job warned about it, and this job fails here. Publication has
+      # already happened and is unaffected.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pvtr-sarif
+          path: ${{ runner.temp }}/sarif
+
+      # Only failed requirements carry level "error". Code scanning closes an
+      # alert only when a later upload omits it, and passed and needs-review
+      # requirements come back on every run, so their alerts would never
+      # close. They stay in the job summary and the pvtr-sarif artifact.
+      - name: Keep failed requirements only
+        id: sarif
+        env:
+          SARIF_DIR: ${{ runner.temp }}/sarif
+        run: |
+          shopt -s nullglob
+          n=0
+          for f in "$SARIF_DIR"/*.sarif; do
+            jq '.runs |= map(.results = ((.results // []) | map(select(.level == "error"))))' "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+            n=$((n + $(jq '[.runs[].results[]] | length' "$f")))
+          done
+          echo "results=$n" >> "$GITHUB_OUTPUT"
+          echo "$n failed requirement(s) to upload"
+
+      # Code scanning rejects a SARIF carrying no results.
+      - name: Upload to code scanning
+        if: steps.sarif.outputs.results != '0'
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: ${{ runner.temp }}/sarif
+          wait-for-processing: true

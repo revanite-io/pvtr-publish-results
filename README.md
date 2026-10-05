@@ -153,13 +153,12 @@ publishes anyway.
 
 ### Sending the results to code scanning
 
-This workflow does not upload to code scanning. A job inside it that asked for
+`publish.yml` does not upload to code scanning. A job inside it that asked for
 `security-events: write` would force every caller to grant that permission:
 GitHub checks a called workflow's permissions against the caller's before it
 evaluates any `if:`, and fails the run at startup when they fall short.
 
-To get alerts, add a job of your own after the call. It downloads the
-`pvtr-sarif` artifact, keeps only failed requirements, and uploads what is left:
+To get alerts, call `code-scanning.yml` as a job of your own after the publish:
 
 ```yaml
 jobs:
@@ -174,44 +173,23 @@ jobs:
 
   code-scanning:
     needs: publish
-    runs-on: ubuntu-latest
     permissions:
+      actions: read            # upload-sarif needs it in private repositories
       contents: read
       security-events: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: pvtr-sarif
-          path: sarif
-
-      - name: Keep failed requirements only
-        id: sarif
-        run: |
-          shopt -s nullglob
-          n=0
-          for f in sarif/*.sarif; do
-            jq '.runs |= map(.results = ((.results // []) | map(select(.level == "error"))))' "$f" > "$f.tmp"
-            mv "$f.tmp" "$f"
-            n=$((n + $(jq '[.runs[].results[]] | length' "$f")))
-          done
-          echo "results=$n" >> "$GITHUB_OUTPUT"
-
-      - if: steps.sarif.outputs.results != '0'
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: sarif
+    uses: revanite-io/pvtr-publish-results/.github/workflows/code-scanning.yml@v1
 ```
 
-Only failed requirements carry `level: error`. Keep the filter. Code scanning
-opens an alert for every uploaded result and closes it only when a later upload
-omits it. Passed and needs-review requirements come back on every run, so their
-alerts would never close. They stay in the job summary and the artifact. The
-`if:` skips the upload when nothing failed, because code scanning rejects a
-SARIF with no results.
+It uploads failed requirements only. Code scanning opens an alert for every
+uploaded result and closes it only when a later upload omits it. Passed and
+needs-review requirements come back on every run, so their alerts would never
+close. They stay in the job summary and the `pvtr-sarif` artifact. When nothing
+failed, nothing is uploaded, because code scanning rejects a SARIF with no
+results.
 
 The artifact is missing when this publisher could not decode the plugin's log.
-The download then fails and turns your `code-scanning` job red. The publication
-has already happened and is unaffected.
+The `code-scanning` job then fails. The publication has already happened and is
+unaffected.
 
 ## What verified does not prove
 
@@ -247,7 +225,9 @@ the repository's Security tab.
 `openssf/github-repo` plugin in dry-run mode, on every push to `main` and on
 demand. It rehearses everything except the hub push and the Sigstore signing:
 the verified plugin install, the unprivileged run, the pre-run binding, the
-artifact handoff, the pinned publisher checkout, and the cold build.
+artifact handoff, the pinned publisher checkout, and the cold build. It then
+calls `code-scanning.yml`, which uploads to this repository's code scanning
+only when the rehearsal found a failed requirement.
 
 ## Development
 

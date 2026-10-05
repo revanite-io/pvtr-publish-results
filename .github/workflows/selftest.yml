@@ -33,3 +33,14 @@ jobs:
               owner: revanite-io
               repo: pvtr-publish-results
               token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Proves code-scanning.yml starts under a caller granting exactly what the
+  # README tells callers to grant, and that its filter runs on real output.
+  # The upload itself runs only when the rehearsal found a failed requirement.
+  code-scanning:
+    needs: rehearse
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/code-scanning.yml
