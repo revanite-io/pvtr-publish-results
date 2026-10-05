@@ -64,7 +64,6 @@ Callers publishing to preview use `@v1.0.0-rc` with
 | `config` (secret)  | one of   | The same config inline, for plugins whose vars carry secrets. |
 | `hub`              | no       | `https://hub.grc.store` (default) or `https://hub.preview.grc.store`. Any other value fails before pvtr runs. |
 | `dry-run`          | no       | Run everything but the publish; bundles land in the `pvtr-bundles` artifact as OCI layouts. Nothing is signed or sent. |
-| `upload-sarif`     | no       | Also send the results to the caller's code scanning alerts. Needs `security-events: write` on the calling job. Skipped on a dry run. |
 
 The hub is not free-form. It is part of what "verified" means: the plugin is
 installed from it and the result is published to it, so an arbitrary hub could
@@ -145,8 +144,6 @@ can never describe something other than what landed:
 - **A job summary** — the coordinate, the verdict, the counts, and a row per
   requirement — on the `publish` job, always.
 - **SARIF 2.1.0**, one document per log, in the `pvtr-sarif` artifact, always.
-  With `upload-sarif: true` a separate `report` job also sends it to the
-  caller's code scanning alerts.
 
 Both are derived, never load-bearing. Publishing passes the log through as
 ordered YAML on whatever go-gemara the plugin was built with; only these views
@@ -154,8 +151,15 @@ decode it into this publisher's structs, and that is the one step here that a
 version gap can break. When it does, the run says so with a `::warning::` and
 publishes anyway.
 
-Code scanning is opt-in because it needs `security-events: write`, which the
-calling job must grant:
+### Sending the results to code scanning
+
+This workflow does not upload to code scanning. A job inside it that asked for
+`security-events: write` would force every caller to grant that permission:
+GitHub checks a called workflow's permissions against the caller's before it
+evaluates any `if:`, and fails the run at startup when they fall short.
+
+To get alerts, add a job of your own after the call. It downloads the
+`pvtr-sarif` artifact, keeps only failed requirements, and uploads what is left:
 
 ```yaml
 jobs:
@@ -163,18 +167,51 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      security-events: write   # only for upload-sarif
     uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1
     with:
       target: my-org/my-repo@1.0.0
       license: CC0-1.0
-      upload-sarif: true
+
+  code-scanning:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: pvtr-sarif
+          path: sarif
+
+      - name: Keep failed requirements only
+        id: sarif
+        run: |
+          shopt -s nullglob
+          n=0
+          for f in sarif/*.sarif; do
+            jq '.runs |= map(.results = ((.results // []) | map(select(.level == "error"))))' "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+            n=$((n + $(jq '[.runs[].results[]] | length' "$f")))
+          done
+          echo "results=$n" >> "$GITHUB_OUTPUT"
+
+      - if: steps.sarif.outputs.results != '0'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif
 ```
 
-The permission is granted to a job of its own that runs after the publish, not
-to the job holding the signing identity, and a caller that leaves the input
-`false` never dispatches that job and never has to grant it. A SARIF carrying
-no results is not uploaded: code scanning rejects it.
+Only failed requirements carry `level: error`. Keep the filter. Code scanning
+opens an alert for every uploaded result and closes it only when a later upload
+omits it. Passed and needs-review requirements come back on every run, so their
+alerts would never close. They stay in the job summary and the artifact. The
+`if:` skips the upload when nothing failed, because code scanning rejects a
+SARIF with no results.
+
+The artifact is missing when this publisher could not decode the plugin's log.
+The download then fails and turns your `code-scanning` job red. The publication
+has already happened and is unaffected.
 
 ## What verified does not prove
 
