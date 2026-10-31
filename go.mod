@@ -3,7 +3,7 @@ module github.com/revanite-io/pvtr-publish-results
 go 1.26
 
 require (
-	github.com/gemaraproj/go-gemara v0.10.0
+	github.com/gemaraproj/go-gemara v0.12.0
 	github.com/gemaraproj/grc-store-clientkit v0.2.0
 	github.com/goccy/go-yaml v1.19.2
 	github.com/opencontainers/go-digest v1.0.0
