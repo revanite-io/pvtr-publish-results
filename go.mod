@@ -1,13 +1,13 @@
 module github.com/revanite-io/pvtr-publish-results
 
-go 1.26
+go 1.26.10
 
 require (
 	github.com/gemaraproj/go-gemara v0.10.0
 	github.com/gemaraproj/grc-store-clientkit v0.2.0
 	github.com/goccy/go-yaml v1.19.2
 	github.com/opencontainers/go-digest v1.0.0
-	github.com/revanite-io/grc-store-protocol v0.16.0
+	github.com/revanite-io/grc-store-protocol v0.24.0
 	oras.land/oras-go/v2 v2.6.2
 )
 
