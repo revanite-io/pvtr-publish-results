@@ -96,6 +96,8 @@ github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
 github.com/gemaraproj/go-gemara v0.10.0 h1:di5L49r6QdgjDlxsSTh3Y2VJHpvMnO/lv4o5MteITd4=
 github.com/gemaraproj/go-gemara v0.10.0/go.mod h1:f2Z92OdIEsxvt6LYud/qxJ0gSRGsZUD6pv+epM2Iytw=
+github.com/gemaraproj/grc-store-clientkit v0.3.0 h1:SUaWOLpvCwBp1JDEFCz0sl30u3kd3mJWtGXZMMWS6Cg=
+github.com/gemaraproj/grc-store-clientkit v0.3.0/go.mod h1:JuQoSqZsFg2Uwm+cXfJXMy6MyF+e4BmV1Hc90OrOsHU=
 github.com/go-chi/chi/v5 v5.3.0 h1:halUjDxhshgXHMrao5bB8eNBXo/rnzwr8m5m36glehM=
 github.com/go-chi/chi/v5 v5.3.0/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
