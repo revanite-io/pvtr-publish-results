@@ -8,7 +8,7 @@
 #       actions: read
 #       contents: read
 #       security-events: write
-#     uses: revanite-io/pvtr-publish-results/.github/workflows/code-scanning.yml@v1
+#     uses: revanite-io/pvtr-publish-results/.github/workflows/code-scanning.yml@v2
 #
 # It is a separate workflow, not a job in publish.yml, because GitHub checks a
 # called workflow's permissions against the caller's grant before it

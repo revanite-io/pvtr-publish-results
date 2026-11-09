@@ -3,9 +3,9 @@
 # names THIS workflow. The hub grants the verified tier by comparing the
 # certificate's job_workflow_ref with
 #
-#   revanite-io/pvtr-publish-results/.github/workflows/publish.yml@refs/tags/v1
+#   revanite-io/pvtr-publish-results/.github/workflows/publish.yml@refs/tags/v2
 #
-# so the repo name, this file's path, and the v1 tag are the trust root.
+# so the repo name, this file's path, and the v2 tag are the trust root.
 # Renaming or moving any of them invalidates every result published so far.
 #
 # Two jobs on purpose. The plugin is third-party code, so it runs in a job
@@ -29,7 +29,7 @@ on:
         type: string
         required: false
       hub:
-        description: "grc.store hub to install the plugin from and publish to. Exactly https://hub.grc.store (default, accepts @v1) or https://hub.preview.grc.store (accepts @v1.0.0-rc); anything else fails before pvtr runs."
+        description: "grc.store hub to install the plugin from and publish to. Exactly https://hub.grc.store (default, accepts @v2) or https://hub.preview.grc.store (accepts @v2.0.0-rc); anything else fails before pvtr runs."
         type: string
         default: https://hub.grc.store
       dry-run:

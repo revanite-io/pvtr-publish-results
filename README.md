@@ -9,7 +9,7 @@ That is the whole point: the hub can accept a log with one string comparison
 against the trust root
 
 ```text
-revanite-io/pvtr-publish-results/.github/workflows/publish.yml@refs/tags/v1
+revanite-io/pvtr-publish-results/.github/workflows/publish.yml@refs/tags/v2
 ```
 
 instead of linting the caller's workflow the way Scorecard does. A signature
@@ -24,7 +24,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1
+    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v2
     with:
       config: .pvtr/config.yml      # committed pvtr config naming exactly one target
       target: acme/my-repo@1.4.0    # <namespace>/<id>@<version>; namespace is the target owner's org
@@ -50,11 +50,12 @@ secret gets its config inline instead:
 ```
 
 Reference the workflow by tag, not by commit SHA. A SHA-pinned call puts the SHA
-in the certificate instead of `refs/tags/v1`, and the hub's identity check fails.
+in the certificate instead of `refs/tags/v2`, and the hub's identity check fails.
 The hub is configured with exactly one accepted tag per environment: production
-accepts `v1`, and `hub.preview.grc.store` accepts the pre-release tag `v1.0.0-rc`.
-Callers publishing to preview use `@v1.0.0-rc` with
+accepts `v2`, and `hub.preview.grc.store` accepts the pre-release tag `v2.0.0-rc`.
+Callers publishing to preview use `@v2.0.0-rc` with
 `hub: https://hub.preview.grc.store`; each environment rejects the other's tag.
+`v2` is a GitHub immutable release, so the code it names never moves.
 
 | Input / secret     | Required | Meaning |
 |--------------------|----------|---------|
@@ -69,6 +70,18 @@ The hub is not free-form. It is part of what "verified" means: the plugin is
 installed from it and the result is published to it, so an arbitrary hub could
 feed the run a plugin of its own choosing and collect a bundle signed by this
 workflow. Only the two grc.store hubs are accepted.
+
+### Moving from `v1`
+
+Change `@v1` to `@v2`; nothing else in the call changes. `v2` publishes
+through the hub's staging repository: each bundle is pushed to
+`staging/<namespace>/<name>`, and the hub copies it into the served
+repository `<namespace>/<name>` once its checks pass. `v1` pushes to the
+served repository, which a cut-over hub no longer lets anyone but itself
+write, so after the cutover `v1` stops with
+`the hub does not trust <repo> to publish under namespace <ns>`. The hub
+trusts one tag at a time, so `v2` cannot publish to a hub that has not cut
+over yet either.
 
 ## What the workflow does
 
@@ -132,9 +145,13 @@ with nothing pushed:
 
 The publish sequence itself (mint, pack, push, sign, provenance, sync) is
 [grc-store-clientkit](https://github.com/gemaraproj/grc-store-clientkit)'s
-`bundle.Publish`. Two independent tokens: the hub bearer is the job's OIDC
-token (trusted publishing, no stored secret), the signing identity is a
-separate OIDC token for public-good Fulcio.
+`bundle.Publish`. It pushes to the staging repository
+`staging/<namespace>/<name>` and the sync names the served one; the hub checks
+the bundle in staging and copies it into the served repository. A pushed
+bundle that is never synced is removed from staging after about 24 hours.
+Two independent tokens: the hub bearer is the job's OIDC token (trusted
+publishing, no stored secret), the signing identity is a separate OIDC token
+for public-good Fulcio.
 
 ## Reports
 
@@ -166,7 +183,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1
+    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v2
     with:
       target: my-org/my-repo@1.0.0
       license: CC0-1.0
@@ -177,7 +194,7 @@ jobs:
       actions: read            # upload-sarif needs it in private repositories
       contents: read
       security-events: write
-    uses: revanite-io/pvtr-publish-results/.github/workflows/code-scanning.yml@v1
+    uses: revanite-io/pvtr-publish-results/.github/workflows/code-scanning.yml@v2
 ```
 
 It uploads failed requirements only. Code scanning opens an alert for every
