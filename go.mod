@@ -3,7 +3,7 @@ module github.com/revanite-io/pvtr-publish-results
 go 1.26.10
 
 require (
-	github.com/gemaraproj/go-gemara v0.12.0
+	github.com/gemaraproj/go-gemara v0.13.0
 	github.com/gemaraproj/grc-store-clientkit v0.3.0
 	github.com/goccy/go-yaml v1.19.2
 	github.com/opencontainers/go-digest v1.0.0
@@ -19,7 +19,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coreos/go-oidc/v3 v3.20.0 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467 // indirect
-	github.com/defenseunicorns/go-oscal v0.7.1 // indirect
+	github.com/defenseunicorns/go-oscal v0.7.2 // indirect
 	github.com/digitorus/pkcs7 v0.0.0-20230818184609-3a137a874352 // indirect
 	github.com/digitorus/timestamp v0.0.0-20231217203849-220c5c2851b7 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
